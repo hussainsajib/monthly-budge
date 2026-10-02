@@ -1,0 +1,174 @@
+export type Kind = 'expense' | 'income'
+export type AccountKind = 'bank' | 'credit' | 'cash'
+
+export interface Category {
+  id: number
+  name: string
+  parent_id: number | null
+  kind: Kind
+  depth: number
+  path: string
+  budget_cents: number
+  effective_budget_cents: number
+  description: string
+  sort_order: number
+  is_active: boolean
+  has_children: boolean
+  transaction_count: number
+}
+
+export interface Account {
+  id: number
+  name: string
+  kind: AccountKind
+  opening_balance_cents: number
+  opening_date: string | null
+  is_active: boolean
+}
+
+export interface Txn {
+  id: number
+  date: string
+  description: string
+  category_id: number
+  category_path: string
+  kind: Kind
+  account_id: number | null
+  account_name: string | null
+  amount_cents: number
+  notes: string | null
+  planned: boolean
+}
+
+export interface TxnPage {
+  items: Txn[]
+  total: number
+  page: number
+  pages: number
+}
+
+export interface TxnBody {
+  date: string
+  description: string
+  category_id: number
+  account_id: number | null
+  amount: string
+  notes: string
+}
+
+export interface Recurring {
+  id: number
+  description: string
+  category_id: number
+  category_path: string
+  account_id: number | null
+  account_name: string | null
+  amount_cents: number
+  day_of_month: number
+  is_active: boolean
+}
+
+export interface RecurringBody {
+  description: string
+  category_id: number
+  account_id: number | null
+  amount: string
+  day_of_month: number
+  is_active: boolean
+}
+
+export interface Suggestion {
+  description: string
+  category_id: number
+  account_id: number | null
+  amount: string
+}
+
+export interface ImportPreviewRow {
+  date: string
+  description: string
+  amount_cents: number
+  direction: 'in' | 'out'
+  category_id: number | null
+  duplicate: boolean
+  key: string
+}
+
+export interface ReportRow {
+  category_id: number
+  name: string
+  depth: number
+  kind: Kind
+  has_children: boolean
+  months: number[]
+  budget: number
+  total: number
+  avg: number
+  variance: number
+  status: '' | 'over' | 'under'
+}
+
+export interface Report {
+  year: number
+  month: number
+  net_months: number[]
+  expense_budget: number
+  income_budget: number
+  avg_expense: number
+  rows: ReportRow[]
+  chart: {
+    months: string[]
+    spending: number[]
+    income: number[]
+    categories: string[]
+    category_actual: number[]
+    category_budget: number[]
+  }
+}
+
+export interface LedgerRow {
+  txn_id: number
+  date: string
+  description: string
+  delta_cents: number
+  balance_cents: number
+  is_planned: boolean
+  level: '' | 'warn' | 'low'
+}
+
+export interface Cashflow {
+  account: Account | null
+  ledger: {
+    rows: LedgerRow[]
+    current_balance_cents: number
+    projected_balance_cents: number
+    lowest: LedgerRow | null
+    low_threshold_cents: number
+    warn_threshold_cents: number
+  } | null
+}
+
+export interface BudgetLine {
+  category_id: number
+  name: string
+  parent_id: number | null
+  depth: number
+  kind: Kind
+  has_children: boolean
+  is_active: boolean
+  default_cents: number
+  budget_cents: number
+  is_override: boolean
+  actual_cents: number
+  remaining_cents: number
+}
+
+export interface BudgetMonth {
+  month: string
+  income_budget: number
+  expense_budget: number
+  income_actual: number
+  expense_actual: number
+  unassigned: number
+  lines: BudgetLine[]
+}

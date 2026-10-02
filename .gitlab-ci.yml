@@ -1,0 +1,70 @@
+# Skeleton pipeline: test on every push, build + deploy to Cloud Run from the default branch.
+#
+# Required CI/CD variables (Settings > CI/CD > Variables):
+#   GCP_PROJECT_ID   GCP_REGION   AR_REPO (Artifact Registry repo name)   CLOUD_RUN_SERVICE
+#   GCP_SA_KEY       (File type; service account with Artifact Registry Writer + Cloud Run Admin + Service Account User)
+# Prefer Workload Identity Federation over a key file once you have it set up.
+#
+# Secrets are read by Cloud Run from Secret Manager, not from CI:
+#   budget-database-url -> DATABASE_URL     budget-app-password -> APP_PASSWORD
+
+stages: [ui, test, build, deploy]
+
+variables:
+  IMAGE: "$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$AR_REPO/monthly-budget"
+
+ui:
+  stage: ui
+  image: node:22-slim
+  cache:
+    key:
+      files: [frontend/package-lock.json]
+    paths: [frontend/.npm]
+  script:
+    - cd frontend
+    - npm ci --cache .npm --prefer-offline
+    - npm run build # type-checks, then bundles into frontend/dist
+  artifacts:
+    paths: [frontend/dist]
+    expire_in: 1 day
+
+test:
+  stage: test
+  image: python:3.13-slim
+  needs: [ui] # pulls in frontend/dist so the SPA-serving tests run rather than skip
+  cache:
+    key: pip
+    paths: [.cache/pip]
+  variables:
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  script:
+    - pip install -r requirements-dev.txt
+    - ruff check .
+    - pytest -q
+
+build:
+  stage: build
+  image: google/cloud-sdk:slim
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - gcloud auth activate-service-account --key-file="$GCP_SA_KEY"
+    - gcloud builds submit --project="$GCP_PROJECT_ID" --tag "$IMAGE:$CI_COMMIT_SHORT_SHA" .
+
+deploy:
+  stage: deploy
+  image: google/cloud-sdk:slim
+  needs: [build]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  environment: production
+  script:
+    - gcloud auth activate-service-account --key-file="$GCP_SA_KEY"
+    - >
+      gcloud run deploy "$CLOUD_RUN_SERVICE"
+      --project="$GCP_PROJECT_ID" --region="$GCP_REGION"
+      --image "$IMAGE:$CI_COMMIT_SHORT_SHA"
+      --allow-unauthenticated
+      --set-secrets=DATABASE_URL=budget-database-url:latest,APP_PASSWORD=budget-app-password:latest
+      --add-cloudsql-instances="$CLOUD_SQL_CONNECTION"
+      --max-instances=1

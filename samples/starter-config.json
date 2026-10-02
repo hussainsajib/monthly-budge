@@ -1,0 +1,418 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "path": [
+        "Fixed Expenses"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 0,
+      "description": "",
+      "sort_order": 10,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Fixed Expenses",
+        "Rent"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 150000,
+      "description": "",
+      "sort_order": 10,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Fixed Expenses",
+        "Car Lease"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 45000,
+      "description": "",
+      "sort_order": 20,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Fixed Expenses",
+        "Car Insurance"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 20000,
+      "description": "",
+      "sort_order": 30,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Fixed Expenses",
+        "Home Insurance"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 3000,
+      "description": "",
+      "sort_order": 40,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Fixed Expenses",
+        "Student Loan"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 25000,
+      "description": "",
+      "sort_order": 50,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Fixed Expenses",
+        "Personal Loan"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 20000,
+      "description": "",
+      "sort_order": 60,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Fixed Expenses",
+        "Bank Fees"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 1500,
+      "description": "",
+      "sort_order": 70,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Essential Variable"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 0,
+      "description": "",
+      "sort_order": 20,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Essential Variable",
+        "Grocery"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 60000,
+      "description": "",
+      "sort_order": 80,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Essential Variable",
+        "Family Support"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 30000,
+      "description": "",
+      "sort_order": 90,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Essential Variable",
+        "Utilities"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 30000,
+      "description": "",
+      "sort_order": 100,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Essential Variable",
+        "Education"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 3000,
+      "description": "",
+      "sort_order": 110,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Essential Variable",
+        "Car Fuel"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 20000,
+      "description": "",
+      "sort_order": 120,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Financial & Debt"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 0,
+      "description": "",
+      "sort_order": 30,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Financial & Debt",
+        "Credit Card Payment"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 40000,
+      "description": "",
+      "sort_order": 130,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 0,
+      "description": "",
+      "sort_order": 40,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary",
+        "Dining Out / Takeout"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 10000,
+      "description": "",
+      "sort_order": 140,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary",
+        "Entertainment & Activities"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 15000,
+      "description": "",
+      "sort_order": 150,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary",
+        "Donations & Charity"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 5000,
+      "description": "",
+      "sort_order": 160,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary",
+        "Investments"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 10000,
+      "description": "",
+      "sort_order": 170,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary",
+        "Clothing & Shopping"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 5000,
+      "description": "",
+      "sort_order": 180,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary",
+        "Subscriptions"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 2500,
+      "description": "",
+      "sort_order": 190,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary",
+        "Health & Medical"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 5000,
+      "description": "",
+      "sort_order": 200,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Discretionary",
+        "Miscellaneous / Gifts"
+      ],
+      "kind": "expense",
+      "monthly_budget_cents": 7500,
+      "description": "",
+      "sort_order": 210,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Income"
+      ],
+      "kind": "income",
+      "monthly_budget_cents": 0,
+      "description": "",
+      "sort_order": 50,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Income",
+        "Salary (net)"
+      ],
+      "kind": "income",
+      "monthly_budget_cents": 500000,
+      "description": "",
+      "sort_order": 220,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Income",
+        "Government Benefits"
+      ],
+      "kind": "income",
+      "monthly_budget_cents": 0,
+      "description": "",
+      "sort_order": 230,
+      "is_active": true
+    },
+    {
+      "path": [
+        "Income",
+        "Other Income"
+      ],
+      "kind": "income",
+      "monthly_budget_cents": 0,
+      "description": "",
+      "sort_order": 240,
+      "is_active": true
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Chequing",
+      "kind": "bank",
+      "opening_balance_cents": 0,
+      "opening_date": null,
+      "is_active": true
+    },
+    {
+      "name": "Credit Card",
+      "kind": "credit",
+      "opening_balance_cents": 0,
+      "opening_date": null,
+      "is_active": true
+    },
+    {
+      "name": "Savings",
+      "kind": "bank",
+      "opening_balance_cents": 0,
+      "opening_date": null,
+      "is_active": true
+    },
+    {
+      "name": "Cash",
+      "kind": "cash",
+      "opening_balance_cents": 0,
+      "opening_date": null,
+      "is_active": true
+    },
+    {
+      "name": "Other",
+      "kind": "bank",
+      "opening_balance_cents": 0,
+      "opening_date": null,
+      "is_active": true
+    }
+  ],
+  "recurring": [
+    {
+      "description": "Rent",
+      "category": [
+        "Fixed Expenses",
+        "Rent"
+      ],
+      "account": "Chequing",
+      "amount_cents": 150000,
+      "day_of_month": 1,
+      "is_active": true
+    },
+    {
+      "description": "Insurance - Car",
+      "category": [
+        "Fixed Expenses",
+        "Car Insurance"
+      ],
+      "account": "Credit Card",
+      "amount_cents": 20000,
+      "day_of_month": 1,
+      "is_active": true
+    },
+    {
+      "description": "Insurance - Home",
+      "category": [
+        "Fixed Expenses",
+        "Home Insurance"
+      ],
+      "account": "Credit Card",
+      "amount_cents": 3000,
+      "day_of_month": 1,
+      "is_active": true
+    },
+    {
+      "description": "Personal Loan",
+      "category": [
+        "Fixed Expenses",
+        "Personal Loan"
+      ],
+      "account": "Chequing",
+      "amount_cents": 20000,
+      "day_of_month": 15,
+      "is_active": true
+    },
+    {
+      "description": "Student Loan",
+      "category": [
+        "Fixed Expenses",
+        "Student Loan"
+      ],
+      "account": "Chequing",
+      "amount_cents": 25000,
+      "day_of_month": 15,
+      "is_active": true
+    }
+  ],
+  "monthly_budgets": [],
+  "settings": {
+    "low_balance_cents": "50000",
+    "warn_balance_cents": "100000"
+  }
+}

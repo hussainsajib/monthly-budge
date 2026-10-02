@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+data/
+*.db
+
+# Personal financial data: bank exports and the old budget workbook. Keep them out of the repo.
+*.csv
+*.xlsx
+*.xls
+
+# Front end build output and dependencies
+frontend/node_modules/
+frontend/dist/
+
+# CI caches
+.cache/
+frontend/.npm/
+
+# Your own setup (categories, budgets, accounts) exported by `python -m app.cli export-config`
+personal/
