@@ -1,9 +1,11 @@
+import { Repeat, Tags, Wallet } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { Tooltip } from 'react-tooltip'
 
 const TABS = [
-  { to: 'categories', label: 'Categories' },
-  { to: 'accounts', label: 'Accounts' },
-  { to: 'recurring', label: 'Recurring' },
+  { to: 'categories', label: 'Categories', icon: Tags },
+  { to: 'accounts', label: 'Accounts', icon: Wallet },
+  { to: 'recurring', label: 'Recurring', icon: Repeat },
 ]
 
 export default function SettingsLayout() {
@@ -11,13 +13,14 @@ export default function SettingsLayout() {
     <>
       <h1>Settings</h1>
       <div className="tabs" role="tablist">
-        {TABS.map((t) => (
-          <NavLink key={t.to} to={t.to} className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>
-            {t.label}
+        {TABS.map(({ to, label, icon: Icon }) => (
+          <NavLink key={to} to={to} className={({ isActive }) => `tab with-icon${isActive ? ' active' : ''}`}>
+            <Icon size={15} /> {label}
           </NavLink>
         ))}
       </div>
       <Outlet />
+      <Tooltip id="settings-tip" />
     </>
   )
 }

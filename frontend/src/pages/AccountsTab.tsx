@@ -1,12 +1,20 @@
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table'
+import { Archive, ArchiveRestore, Pencil, Trash, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api'
-import { Loading } from '../components/ui'
-import { centsToInput } from '../money'
-import { useAccounts } from '../queries'
+import { Bar, SortHeader } from '../components/table'
+import { Modal, ViewToggle, useViewMode } from '../components/ui'
+import { centsToInput, formatMoney } from '../money'
+import { useSortedAccounts } from '../queries'
 import { useRun } from '../toast'
 import type { Account } from '../types'
 
-const KINDS = ['bank', 'credit', 'cash']
+const KINDS = [
+  { value: 'bank', label: 'Bank' },
+  { value: 'credit', label: 'Credit card' },
+  { value: 'cash', label: 'Cash' },
+] as const
 
 interface Draft {
   name: string
@@ -18,15 +26,19 @@ interface Draft {
 
 const EMPTY: Draft = { name: '', kind: 'bank', opening_balance: '0', opening_date: '', is_active: true }
 
-function fromAccount(a: Account): Draft {
-  return {
-    name: a.name,
-    kind: a.kind,
-    opening_balance: centsToInput(a.opening_balance_cents),
-    opening_date: a.opening_date ?? '',
-    is_active: a.is_active,
-  }
-}
+const fromAccount = (a: Account): Draft => ({
+  name: a.name,
+  kind: a.kind,
+  opening_balance: centsToInput(a.opening_balance_cents),
+  opening_date: a.opening_date ?? '',
+  is_active: a.is_active,
+})
+
+const toBody = (d: Draft) => ({ ...d, opening_date: d.opening_date || null })
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+const kindLabel = (kind: string) => KINDS.find((k) => k.value === kind)?.label ?? kind
 
 function DraftFields({ draft, onChange, idPrefix }: { draft: Draft; onChange: (d: Draft) => void; idPrefix: string }) {
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => onChange({ ...draft, [k]: v })
@@ -34,14 +46,22 @@ function DraftFields({ draft, onChange, idPrefix }: { draft: Draft; onChange: (d
     <>
       <div>
         <label htmlFor={`${idPrefix}-name`}>Name</label>
-        <input id={`${idPrefix}-name`} type="text" required value={draft.name} onChange={(e) => set('name', e.target.value)} />
+        <input
+          id={`${idPrefix}-name`}
+          type="text"
+          required
+          autoFocus
+          maxLength={60}
+          value={draft.name}
+          onChange={(e) => set('name', e.target.value)}
+        />
       </div>
       <div>
         <label htmlFor={`${idPrefix}-kind`}>Type</label>
         <select id={`${idPrefix}-kind`} value={draft.kind} onChange={(e) => set('kind', e.target.value)}>
           {KINDS.map((k) => (
-            <option key={k} value={k}>
-              {k}
+            <option key={k.value} value={k.value}>
+              {k.label}
             </option>
           ))}
         </select>
@@ -69,65 +89,465 @@ function DraftFields({ draft, onChange, idPrefix }: { draft: Draft; onChange: (d
   )
 }
 
-const toBody = (d: Draft) => ({ ...d, opening_date: d.opening_date || null })
-
-function AccountRow({ account }: { account: Account }) {
-  const run = useRun()
-  const [draft, setDraft] = useState(fromAccount(account))
-  const dirty = JSON.stringify(draft) !== JSON.stringify(fromAccount(account))
-
+function AccountsSkeleton() {
+  const columns: Array<[number, string]> = [
+    [180, ''],
+    [90, ''],
+    [96, 'num'],
+    [104, 'hide-sm'],
+    [104, 'num'],
+    [80, 'num'],
+    [96, 'num hide-sm'],
+  ]
   return (
-    <form
-      className="row account-row"
-      onSubmit={(e) => {
-        e.preventDefault()
-        void run(() => api.updateAccount(account.id, toBody(draft)), 'Saved')
-      }}
-    >
-      <DraftFields draft={draft} onChange={setDraft} idPrefix={`acc-${account.id}`} />
-      <label className="check shrink">
-        <input type="checkbox" checked={draft.is_active} onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })} />{' '}
-        Active
-      </label>
-      <button className="shrink" type="submit" disabled={!dirty}>
-        Save
-      </button>
-    </form>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th className="num">Opening</th>
+          <th className="hide-sm">Opening date</th>
+          <th className="num">Balance</th>
+          <th className="num">Transactions</th>
+          <th className="num hide-sm">Activity</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {Array.from({ length: 6 }).map((_, row) => (
+          <tr key={row}>
+            {columns.map(([w, cls], col) => (
+              <td key={col} className={cls}>
+                <Bar w={w} />
+              </td>
+            ))}
+            <td />
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function AccountTile({
+  account,
+  onEdit,
+  onToggle,
+}: {
+  account: Account
+  onEdit: (a: Account) => void
+  onToggle: (a: Account) => void
+}) {
+  return (
+    <article className="tile">
+      <div className="tile-head">
+        <span className={`kind-dot ${account.kind}`} />
+        <span className="tile-name" title={account.name}>
+          {account.name}
+        </span>
+        {!account.is_active && <span className="chip">inactive</span>}
+      </div>
+      <div className="tile-value">{formatMoney(account.current_balance_cents)}</div>
+      <div className="tile-meta">
+        {kindLabel(account.kind)} · opened {account.opening_date ?? '—'}
+      </div>
+      <div className="tile-foot">
+        {account.transaction_count ? (
+          <Link
+            to={`/transactions?account_id=${account.id}`}
+            className="num-link"
+            aria-label={`View ${plural(account.transaction_count, 'transaction')} in ${account.name}`}
+            data-tooltip-id="settings-tip"
+            data-tooltip-content="View transactions"
+          >
+            {plural(account.transaction_count, 'transaction')}
+          </Link>
+        ) : (
+          <span className="tile-meta">No transactions</span>
+        )}
+        <span className="icon-group">
+          <button
+            type="button"
+            className="icon-btn ghost"
+            aria-label={account.is_active ? `Archive ${account.name}` : `Restore ${account.name}`}
+            data-tooltip-id="settings-tip"
+            data-tooltip-content={account.is_active ? 'Archive' : 'Restore'}
+            onClick={() => onToggle(account)}
+          >
+            {account.is_active ? <Archive size={18} /> : <ArchiveRestore size={18} />}
+          </button>
+          <button
+            type="button"
+            className="icon-btn ghost"
+            aria-label={`Edit ${account.name}`}
+            data-tooltip-id="settings-tip"
+            data-tooltip-content="Edit"
+            onClick={() => onEdit(account)}
+          >
+            <Pencil size={18} />
+          </button>
+        </span>
+      </div>
+    </article>
+  )
+}
+
+function AccountsTilesSkeleton() {
+  return (
+    <div className="tile-grid" aria-busy="true">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div className="tile" key={i}>
+          <Bar w={130} />
+          <Bar w={92} h={20} />
+          <Bar w={150} />
+        </div>
+      ))}
+    </div>
   )
 }
 
 export default function AccountsTab() {
   const run = useRun()
-  const query = useAccounts()
+  const { view, change: setView } = useViewMode('accounts')
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'name', desc: false }])
   const [draft, setDraft] = useState<Draft>(EMPTY)
+  const [modal, setModal] = useState<{ mode: 'add' } | { mode: 'edit'; id: number } | null>(null)
+  const [confirming, setConfirming] = useState(false)
+
+  const sort = sorting[0]?.id ?? 'name'
+  const dir = sorting[0]?.desc === false ? 'asc' : 'desc'
+  const query = useSortedAccounts(sort, dir)
+  const accounts = query.data ?? []
+
+  const editing = modal?.mode === 'edit' ? accounts.find((a) => a.id === modal.id) : undefined
+  const active = accounts.filter((a) => a.is_active)
+  const inactive = accounts.length - active.length
+  const activeBalance = active.reduce((sum, a) => sum + a.current_balance_cents, 0)
+  const activeTx = active.reduce((sum, a) => sum + a.transaction_count, 0)
+
+  function closeModal() {
+    setModal(null)
+    setConfirming(false)
+  }
+
+  function openAdd() {
+    setDraft(EMPTY)
+    setConfirming(false)
+    setModal({ mode: 'add' })
+  }
+
+  function openEdit(a: Account) {
+    setDraft(fromAccount(a))
+    setConfirming(false)
+    setModal({ mode: 'edit', id: a.id })
+  }
 
   async function add(e: FormEvent) {
     e.preventDefault()
-    if (await run(() => api.createAccount(toBody(draft)), `Added ${draft.name.trim()}`)) setDraft(EMPTY)
+    if (await run(() => api.createAccount(toBody(draft)), `Added ${draft.name.trim()}`)) closeModal()
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault()
+    if (!editing) return
+    if (await run(() => api.updateAccount(editing.id, toBody(draft)), 'Saved')) closeModal()
+  }
+
+  async function destroy() {
+    if (!editing) return
+    if (await run(() => api.deleteAccount(editing.id).then(() => true), `Deleted ${editing.name}`)) closeModal()
+  }
+
+  async function archive() {
+    if (!editing) return
+    if (await run(() => api.updateAccount(editing.id, toBody({ ...draft, is_active: false })), `Archived ${editing.name}`))
+      closeModal()
+  }
+
+  const toggleActive = (a: Account) =>
+    void run(
+      () => api.updateAccount(a.id, toBody({ ...fromAccount(a), is_active: !a.is_active })),
+      a.is_active ? `Archived ${a.name}` : `Restored ${a.name}`,
+    )
+
+  const columns: ColumnDef<Account>[] = [
+    {
+      id: 'name',
+      accessorKey: 'name',
+      header: ({ column }) => <SortHeader column={column} label="Name" />,
+      cell: ({ row }) => {
+        const a = row.original
+        return (
+          <span className="row-label">
+            <span className="nm">{a.name}</span>
+            {!a.is_active && <span className="chip">inactive</span>}
+          </span>
+        )
+      },
+    },
+    {
+      id: 'kind',
+      accessorKey: 'kind',
+      header: ({ column }) => <SortHeader column={column} label="Type" />,
+      cell: ({ row }) => (
+        <span className="row-label">
+          <span className={`kind-dot ${row.original.kind}`} /> {kindLabel(row.original.kind)}
+        </span>
+      ),
+    },
+    {
+      id: 'opening',
+      accessorKey: 'opening_balance_cents',
+      header: ({ column }) => <SortHeader column={column} label="Opening" />,
+      cell: ({ row }) => formatMoney(row.original.opening_balance_cents),
+    },
+    {
+      id: 'opening_date',
+      accessorKey: 'opening_date',
+      header: ({ column }) => <SortHeader column={column} label="Opening date" />,
+      cell: ({ row }) => row.original.opening_date ?? <span className="empty-cell">—</span>,
+    },
+    {
+      id: 'balance',
+      accessorKey: 'current_balance_cents',
+      header: ({ column }) => <SortHeader column={column} label="Balance" />,
+      cell: ({ row }) => <b>{formatMoney(row.original.current_balance_cents)}</b>,
+    },
+    {
+      id: 'transactions',
+      accessorKey: 'transaction_count',
+      header: ({ column }) => <SortHeader column={column} label="Transactions" />,
+      cell: ({ row }) => {
+        const a = row.original
+        if (!a.transaction_count) return <span className="empty-cell">—</span>
+        return (
+          <Link
+            to={`/transactions?account_id=${a.id}`}
+            className="num-link"
+            aria-label={`View ${plural(a.transaction_count, 'transaction')} in ${a.name}`}
+            data-tooltip-id="settings-tip"
+            data-tooltip-content="View transactions"
+          >
+            {a.transaction_count}
+          </Link>
+        )
+      },
+    },
+    {
+      id: 'activity',
+      accessorKey: 'transacted_cents',
+      header: ({ column }) => <SortHeader column={column} label="Activity" />,
+      cell: ({ row }) =>
+        row.original.transacted_cents ? formatMoney(row.original.transacted_cents) : <span className="empty-cell">—</span>,
+    },
+    {
+      id: 'actions',
+      enableSorting: false,
+      header: () => null,
+      cell: ({ row }) => {
+        const a = row.original
+        return (
+          <span className="icon-group">
+            <button
+              type="button"
+              className="icon-btn ghost"
+              aria-label={a.is_active ? `Archive ${a.name}` : `Restore ${a.name}`}
+              data-tooltip-id="settings-tip"
+              data-tooltip-content={a.is_active ? 'Archive' : 'Restore'}
+              onClick={() => toggleActive(a)}
+            >
+              {a.is_active ? <Archive size={18} /> : <ArchiveRestore size={18} />}
+            </button>
+            <button
+              type="button"
+              className="icon-btn ghost"
+              aria-label={`Edit ${a.name}`}
+              data-tooltip-id="settings-tip"
+              data-tooltip-content="Edit"
+              onClick={() => openEdit(a)}
+            >
+              <Pencil size={18} />
+            </button>
+          </span>
+        )
+      },
+    },
+  ]
+
+  const table = useReactTable({
+    data: accounts,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    manualSorting: true,
+    getCoreRowModel: getCoreRowModel(),
+  })
+
+  const cellClass = (id: string) => {
+    if (id === 'opening_date') return 'hide-sm'
+    if (id === 'opening' || id === 'balance' || id === 'transactions') return 'num'
+    if (id === 'activity') return 'num hide-sm'
+    return ''
   }
 
   return (
     <>
-      <form className="card" onSubmit={add}>
-        <h2 style={{ marginTop: 0 }}>Add account</h2>
-        <div className="row">
-          <DraftFields draft={draft} onChange={setDraft} idPrefix="acc-new" />
-          <button className="shrink" type="submit">
-            Add
-          </button>
-        </div>
-        <p className="small muted">
-          Cash flow starts from the opening balance on the opening date, so set both for any account you want a running
-          balance for.
-        </p>
-      </form>
+      <div className="set-head">
+        <h2>Accounts</h2>
+        <span className="set-counts">
+          <span className="chip">{plural(accounts.length, 'account')}</span>
+          <span className="chip">{formatMoney(activeBalance)} across active</span>
+          {inactive > 0 && <span className="chip">{inactive} inactive</span>}
+        </span>
+        <ViewToggle view={view} onChange={setView} />
+        <button
+          className="push icon-btn ghost"
+          type="button"
+          aria-label="Add account"
+          data-tooltip-id="settings-tip"
+          data-tooltip-content="Add account"
+          onClick={openAdd}
+        >
+          <img src="/static/add.svg?v=2" alt="" className="icon-img icon-img-lg" />
+        </button>
+      </div>
 
-      <Loading query={query} />
-      {query.data && (
+      {modal?.mode === 'add' && (
+        <Modal title="Add account" onClose={closeModal}>
+          <form onSubmit={add}>
+            <div className="form-grid">
+              <DraftFields draft={draft} onChange={setDraft} idPrefix="acc-new" />
+            </div>
+            <p className="small muted">
+              Cash flow starts from the opening balance on the opening date, so set both for any account you want a
+              running balance for.
+            </p>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="shrink with-icon" type="submit">
+                <img src="/static/add.svg?v=2" alt="" className="icon-img" /> Add
+              </button>
+              <button className="secondary shrink with-icon" type="button" onClick={closeModal}>
+                <X size={16} /> Cancel
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {modal?.mode === 'edit' && editing && (
+        <Modal title={`Edit ${editing.name}`} onClose={closeModal}>
+          <form onSubmit={save}>
+            <div className="form-grid">
+              <DraftFields draft={draft} onChange={setDraft} idPrefix="acc-edit" />
+            </div>
+            <label className="check">
+              <input type="checkbox" checked={draft.is_active} onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })} />{' '}
+              Active — inactive accounts are hidden from pickers but keep their history
+            </label>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="shrink with-icon" type="submit">
+                <img src="/static/save.svg?v=2" alt="" className="icon-img" /> Save
+              </button>
+              <button className="secondary shrink with-icon" type="button" onClick={closeModal}>
+                <X size={16} /> Cancel
+              </button>
+            </div>
+
+            <div className="danger-zone">
+              <h2>Delete</h2>
+              {confirming ? (
+                <div className="confirm-box">
+                  <p>
+                    Delete <b>{editing.name}</b>?
+                    {editing.transaction_count > 0
+                      ? ` Its ${plural(editing.transaction_count, 'transaction')} stay in your ledger but lose this account.`
+                      : ' It has nothing attached, so this cannot be undone.'}
+                  </p>
+                  <div className="row">
+                    <button className="danger shrink with-icon" type="button" onClick={destroy}>
+                      <Trash size={16} /> Delete
+                    </button>
+                    <button className="secondary shrink" type="button" onClick={() => setConfirming(false)}>
+                      Keep it
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="small muted">
+                    {editing.transaction_count > 0
+                      ? `Its ${plural(editing.transaction_count, 'transaction')} stay in your ledger but lose this account.`
+                      : 'Nothing is attached to this account.'}
+                  </p>
+                  <div className="row" style={{ marginTop: 12 }}>
+                    <button className="secondary shrink with-icon" type="button" onClick={() => void archive()}>
+                      <Archive size={16} /> Archive instead
+                    </button>
+                    <button className="danger shrink with-icon" type="button" onClick={() => setConfirming(true)}>
+                      <Trash size={16} /> Delete account
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {query.isError && <div className="flash err">{query.error?.message ?? 'Failed to load'}</div>}
+
+      {query.isPending ? (
+        view === 'card' ? (
+          <AccountsTilesSkeleton />
+        ) : (
+          <div className="card table-wrap">
+            <AccountsSkeleton />
+          </div>
+        )
+      ) : accounts.length === 0 ? (
         <div className="card">
-          {query.data.map((a) => (
-            <AccountRow key={`${a.id}:${JSON.stringify(a)}`} account={a} />
+          <p className="muted">No accounts yet. Add one to start tracking balances and cash flow.</p>
+        </div>
+      ) : view === 'card' ? (
+        <div className="tile-grid">
+          {accounts.map((a) => (
+            <AccountTile key={a.id} account={a} onEdit={openEdit} onToggle={toggleActive} />
           ))}
+        </div>
+      ) : (
+        <div className="card table-wrap">
+          <table>
+            <thead>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <th key={header.id} className={cellClass(header.column.id)}>
+                      {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                    </th>
+                  ))}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {table.getRowModel().rows.map((row) => (
+                <tr key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id} className={cellClass(cell.column.id)}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="total-row">
+                <td colSpan={4}>{plural(active.length, 'active account')}</td>
+                <td className="num">{formatMoney(activeBalance)}</td>
+                <td className="num">{activeTx || <span className="empty-cell">—</span>}</td>
+                <td className="num hide-sm" />
+              </tr>
+            </tfoot>
+          </table>
         </div>
       )}
     </>

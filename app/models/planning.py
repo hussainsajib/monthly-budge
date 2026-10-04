@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, Date, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -19,7 +19,9 @@ class RecurringTemplate(Base):
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id", ondelete="CASCADE"))
     account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"))
     amount_cents: Mapped[int] = mapped_column(Integer)
-    day_of_month: Mapped[int] = mapped_column(Integer)  # clamped to month length on use
+    day_of_month: Mapped[int] = mapped_column(Integer)  # legacy monthly day; clamped to month length on use
+    # Flexible recurrence. None = monthly on day_of_month. See app.services.recurring for the format.
+    schedule: Mapped[dict | None] = mapped_column(JSON)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     category: Mapped[Category] = relationship(lazy="joined")

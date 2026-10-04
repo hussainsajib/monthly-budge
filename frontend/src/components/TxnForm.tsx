@@ -94,7 +94,6 @@ export default function TxnForm({ initial, submitLabel, onSubmit, descriptions, 
           <input id="f-date" type="date" required value={v.date} onChange={(e) => set('date', e.target.value)} />
         </div>
         <div>
-          <label htmlFor="f-category">Category</label>
           <CategorySelect
             id="f-category"
             categories={categories.data ?? []}

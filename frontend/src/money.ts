@@ -22,3 +22,9 @@ export function todayIso(): string {
 }
 
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** '2026-11' -> 'Nov', or 'Nov 2026' when the year is needed to tell two months apart. */
+export function monthLabel(ym: string, withYear = false): string {
+  const [year, month] = ym.split('-')
+  return withYear ? `${MONTHS[Number(month) - 1]} ${year}` : MONTHS[Number(month) - 1]
+}

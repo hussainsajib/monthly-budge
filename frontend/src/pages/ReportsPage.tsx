@@ -3,36 +3,28 @@ import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import { Loading } from '../components/ui'
-import { MONTHS, formatMoney } from '../money'
+import { formatMoney, monthLabel } from '../money'
 
 const dollars = (v: unknown) => formatMoney(Math.round(Number(v) * 100))
 
 export default function ReportsPage() {
-  const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState<number | null>(null) // null = last month with activity
   const report = useQuery({
-    queryKey: ['report', year, month],
-    queryFn: () => api.report(year, month),
+    queryKey: ['report', month],
+    queryFn: () => api.report(month),
     placeholderData: keepPreviousData,
   })
   const r = report.data
+  // A window that crosses new year needs years on the column headers to stay unambiguous.
+  const withYear = r ? new Set(r.months.map((m) => m.slice(0, 4))).size > 1 : false
+  const range = r ? `${monthLabel(r.months[0], true)} to ${monthLabel(r.months[r.months.length - 1], true)}` : ''
+  const selected = r?.month ?? 1
 
   return (
     <>
-      <h1>Budget tracker — {year}</h1>
+      <h1>Budget tracker{range ? ` — ${range}` : ''}</h1>
 
       <div className="card row">
-        <div>
-          <label htmlFor="rep-year">Year</label>
-          <input
-            id="rep-year"
-            type="number"
-            min={2000}
-            max={2100}
-            value={year}
-            onChange={(e) => e.target.value && setYear(Number(e.target.value))}
-          />
-        </div>
         <div>
           <label htmlFor="rep-month">Month for category chart</label>
           <select
@@ -40,9 +32,9 @@ export default function ReportsPage() {
             value={r?.month ?? ''}
             onChange={(e) => setMonth(Number(e.target.value))}
           >
-            {MONTHS.map((m, i) => (
+            {(r?.months ?? []).map((m, i) => (
               <option key={m} value={i + 1}>
-                {m}
+                {monthLabel(m, true)}
               </option>
             ))}
           </select>
@@ -62,7 +54,7 @@ export default function ReportsPage() {
               <b>{formatMoney(r.expense_budget)}</b>
             </div>
             <div>
-              <span className="muted small">Net this year</span>
+              <span className="muted small">Net in window</span>
               <b className={sum(r.net_months) >= 0 ? 'under' : 'over'}>{formatMoney(sum(r.net_months))}</b>
             </div>
           </div>
@@ -72,7 +64,7 @@ export default function ReportsPage() {
               <h2 style={{ marginTop: 0 }}>Spending vs income by month</h2>
               <div className="chart-box">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={r.chart.months.map((m, i) => ({ month: m, Spending: r.chart.spending[i], Income: r.chart.income[i] }))}>
+                  <BarChart data={r.months.map((m, i) => ({ month: monthLabel(m, withYear), Spending: r.chart.spending[i], Income: r.chart.income[i] }))}>
                     <CartesianGrid stroke="var(--line)" vertical={false} />
                     <XAxis dataKey="month" stroke="var(--muted)" />
                     <YAxis stroke="var(--muted)" />
@@ -85,10 +77,10 @@ export default function ReportsPage() {
               </div>
             </div>
             <div className="card">
-              <h2 style={{ marginTop: 0 }}>{MONTHS[r.month - 1]}: top categories vs budget</h2>
+              <h2 style={{ marginTop: 0 }}>{monthLabel(r.months[selected - 1], true)}: top categories vs budget</h2>
               <div className="chart-box">
                 {r.chart.categories.length === 0 ? (
-                  <p className="muted">No spending in {MONTHS[r.month - 1]}.</p>
+                  <p className="muted">No spending in {monthLabel(r.months[selected - 1], true)}.</p>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
@@ -120,9 +112,9 @@ export default function ReportsPage() {
                 <tr>
                   <th>Category</th>
                   <th className="num">Budget/mo</th>
-                  {MONTHS.map((m) => (
+                  {r.months.map((m) => (
                     <th key={m} className="num">
-                      {m}
+                      {monthLabel(m, withYear)}
                     </th>
                   ))}
                   <th className="num">Total</th>

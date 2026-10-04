@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { AccountSelect, CategorySelect } from '../components/selects'
+import { AccountSelect, CategoryFilter, CategorySelect } from '../components/selects'
 import { NO_FILTERS, isFiltered, makeRowMatcher, type ImportFilters } from '../importFilter'
 import { formatMoney } from '../money'
 import { useAccounts, useCategories } from '../queries'
@@ -152,16 +152,13 @@ export default function ImportPage() {
               />
             </div>
             <div>
-              <label htmlFor="if-category">Category</label>
-              <select id="if-category" value={filters.category} onChange={(e) => setFilter('category', e.target.value)}>
-                <option value="">All categories</option>
-                <option value="none">Unassigned</option>
-                {categories.data?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.path}
-                  </option>
-                ))}
-              </select>
+              <CategoryFilter
+                id="if-category"
+                categories={categories.data ?? []}
+                value={filters.category}
+                onChange={(v) => setFilter('category', v)}
+                unassigned
+              />
             </div>
             <div>
               <label htmlFor="if-year">Year</label>
@@ -304,6 +301,7 @@ export default function ImportPage() {
                       categories={categories.data ?? []}
                       value={r.category_id}
                       onChange={(id) => patch(i, { category_id: id })}
+                      showLabels={false}
                     />
                   </td>
                   <td className={`num${r.direction === 'in' ? ' under' : ''}`}>

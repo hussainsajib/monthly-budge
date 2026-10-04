@@ -8,7 +8,7 @@ from datetime import date
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Category, Transaction
+from app.models import Account, Category, Transaction
 from app.schemas.transaction import TransactionInput
 
 
@@ -37,12 +37,21 @@ def _apply(stmt, f: TransactionFilter):
 
 
 def list_transactions(
-    db: Session, f: TransactionFilter, limit: int = 100, offset: int = 0
+    db: Session, f: TransactionFilter, limit: int = 100, offset: int = 0, sort: str = "date", desc: bool = True
 ) -> tuple[list[Transaction], int]:
     base = _apply(select(Transaction), f)
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    # Correlated subqueries keep the category/account sort independent of the eager-load joins.
+    sort_expr = {
+        "date": Transaction.date,
+        "description": Transaction.description,
+        "amount": Transaction.amount_cents,
+        "category": select(Category.name).where(Category.id == Transaction.category_id).scalar_subquery(),
+        "account": select(Account.name).where(Account.id == Transaction.account_id).scalar_subquery(),
+    }.get(sort, Transaction.date)
+    column = sort_expr.desc() if desc else sort_expr.asc()
     items = db.scalars(
-        base.order_by(Transaction.date.desc(), Transaction.id.desc()).limit(limit).offset(offset)
+        base.order_by(column, Transaction.id.desc()).limit(limit).offset(offset)
     ).unique()
     return list(items), total
 

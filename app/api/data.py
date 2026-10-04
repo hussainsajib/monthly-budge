@@ -2,26 +2,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.money import to_cents
 from app.db.session import get_db
-from app.models import Account, RecurringTemplate, Transaction
+from app.models import INCOME, Account, Category, RecurringTemplate, Transaction
 from app.schemas.transaction import TransactionInput
 from app.services import budgets, importing, reports
 from app.services import categories as category_service
 from app.services import transactions as txn_service
 from app.services.cashflow import build_ledger
 from app.services.categories import CategoryTree
-from app.services.recurring import generate_for_month, list_templates
+from app.services.recurring import generate_for_month, list_templates, validate_schedule
 from app.services.reference import (
     LOW_BALANCE_KEY,
     WARN_BALANCE_KEY,
@@ -33,6 +34,16 @@ router = APIRouter(prefix="/api")
 
 PAGE_SIZE = 100
 ACCOUNT_KINDS = ("bank", "credit", "cash")
+ACCOUNT_SORTS = (
+    "name",
+    "kind",
+    "opening",
+    "opening_date",
+    "balance",
+    "transactions",
+    "activity",
+    "status",
+)
 
 
 def friendly(exc: Exception) -> str:
@@ -66,6 +77,9 @@ class CategoryBody(BaseModel):
 
 def _category_rows(db: Session, tree: CategoryTree) -> list[dict]:
     counts = dict(db.execute(select(Transaction.category_id, func.count()).group_by(Transaction.category_id)).all())
+    recurring = dict(
+        db.execute(select(RecurringTemplate.category_id, func.count()).group_by(RecurringTemplate.category_id)).all()
+    )
     return [
         {
             "id": n.id,
@@ -80,7 +94,9 @@ def _category_rows(db: Session, tree: CategoryTree) -> list[dict]:
             "sort_order": n.category.sort_order,
             "is_active": n.category.is_active,
             "has_children": bool(n.children),
+            "child_count": len(n.children),
             "transaction_count": counts.get(n.id, 0),
+            "recurring_count": recurring.get(n.id, 0),
         }
         for n in tree.walk()
     ]
@@ -135,15 +151,67 @@ class AccountBody(BaseModel):
     is_active: bool = True
 
 
-def _account_out(a: Account) -> dict:
+def _account_out(a: Account, stats: dict | None = None) -> dict:
+    stats = stats or {}
     return {
         "id": a.id,
         "name": a.name,
         "kind": a.kind,
         "opening_balance_cents": a.opening_balance_cents,
         "opening_date": a.opening_date.isoformat() if a.opening_date else None,
+        "current_balance_cents": a.opening_balance_cents + stats.get("delta", 0),
+        "transaction_count": stats.get("count", 0),
+        "transacted_cents": stats.get("abs", 0),
         "is_active": a.is_active,
     }
+
+
+def _sort_accounts(rows: list[dict], sort: str, desc: bool) -> list[dict]:
+    """Order the accounts table. An account set is small, so the shaped rows sort directly in Python."""
+    keys: dict[str, Callable[[dict], Any]] = {
+        "name": lambda a: a["name"].lower(),
+        "kind": lambda a: a["kind"],
+        "opening": lambda a: a["opening_balance_cents"],
+        "opening_date": lambda a: a["opening_date"] or "",
+        "balance": lambda a: a["current_balance_cents"],
+        "transactions": lambda a: a["transaction_count"],
+        "activity": lambda a: a["transacted_cents"],
+        "status": lambda a: a["is_active"],
+    }
+    if sort not in ACCOUNT_SORTS:
+        raise HTTPException(400, f"Sort must be one of: {', '.join(ACCOUNT_SORTS)}")
+    return sorted(rows, key=keys[sort], reverse=desc)
+
+
+def _account_stats(db: Session) -> dict[int, dict]:
+    """Per-account: balance change up to today, transaction count, and total transacted."""
+    today = date.today()
+    deltas = dict(
+        db.execute(
+            select(
+                Transaction.account_id,
+                func.sum(case((Category.kind == INCOME, Transaction.amount_cents), else_=-Transaction.amount_cents)),
+            )
+            .join(Category, Transaction.category_id == Category.id)
+            .where(Transaction.account_id.is_not(None), Transaction.date <= today)
+            .group_by(Transaction.account_id)
+        ).all()
+    )
+    rows = db.execute(
+        select(
+            Transaction.account_id,
+            func.count(),
+            func.sum(func.abs(Transaction.amount_cents)),
+        )
+        .where(Transaction.account_id.is_not(None))
+        .group_by(Transaction.account_id)
+    ).all()
+    stats: dict[int, dict] = {}
+    for acc_id, count, transacted in rows:
+        stats[acc_id] = {"delta": deltas.get(acc_id, 0), "count": count, "abs": transacted or 0}
+    for acc_id, delta in deltas.items():
+        stats.setdefault(acc_id, {"delta": delta, "count": 0, "abs": 0})
+    return stats
 
 
 def _apply_account(acc: Account, body: AccountBody) -> None:
@@ -168,8 +236,14 @@ def _save_account(db: Session, acc: Account, body: AccountBody) -> dict:
 
 
 @router.get("/accounts")
-def get_accounts(include_inactive: bool = True, db: Session = Depends(get_db)):
-    return [_account_out(a) for a in list_accounts(db, include_inactive=include_inactive)]
+def get_accounts(
+    include_inactive: bool = True, sort: str = "name", dir: str = "asc", db: Session = Depends(get_db)
+):
+    if dir not in ("asc", "desc"):
+        raise HTTPException(400, "dir must be 'asc' or 'desc'")
+    stats = _account_stats(db)
+    rows = [_account_out(a, stats.get(a.id)) for a in list_accounts(db, include_inactive=include_inactive)]
+    return _sort_accounts(rows, sort, dir == "desc")
 
 
 @router.post("/accounts", status_code=201)
@@ -183,6 +257,15 @@ def update_account(account_id: int, body: AccountBody, db: Session = Depends(get
     if acc is None:
         raise HTTPException(404, "Account not found")
     return _save_account(db, acc, body)
+
+
+@router.delete("/accounts/{account_id}", status_code=204)
+def delete_account(account_id: int, db: Session = Depends(get_db)):
+    acc = db.get(Account, account_id)
+    if acc is not None:
+        db.delete(acc)  # transactions/recurring reference accounts with ON DELETE SET NULL
+        db.commit()
+    return Response(status_code=204)
 
 
 # -------------------------------------------------------------- transactions
@@ -244,6 +327,8 @@ def list_transactions(
     category_id: int | None = None,
     account_id: int | None = None,
     q: str | None = None,
+    sort: str = "date",
+    dir: str = "desc",
     page: int = 1,
 ):
     tree = category_service.load_tree(db)
@@ -255,7 +340,9 @@ def list_transactions(
         search=q,
     )
     page = max(page, 1)
-    items, total = txn_service.list_transactions(db, flt, PAGE_SIZE, (page - 1) * PAGE_SIZE)
+    items, total = txn_service.list_transactions(
+        db, flt, PAGE_SIZE, (page - 1) * PAGE_SIZE, sort=sort, desc=(dir != "asc")
+    )
     return {
         "items": [_txn_out(t, tree) for t in items],
         "total": total,
@@ -320,6 +407,7 @@ class RecurringBody(BaseModel):
     account_id: int | None = None
     amount: str
     day_of_month: int = 1
+    schedule: dict | None = None
     is_active: bool = True
 
 
@@ -337,27 +425,49 @@ def _recurring_out(t: RecurringTemplate, tree: CategoryTree) -> dict:
         "account_name": t.account.name if t.account else None,
         "amount_cents": t.amount_cents,
         "day_of_month": t.day_of_month,
+        "schedule": t.schedule,
         "is_active": t.is_active,
     }
+
+
+def _sort_recurring(rows: list[dict], sort: str, desc: bool) -> list[dict]:
+    """Order the recurring table. Repeats is left unsortable: its summary is text, not a rank."""
+    keys: dict[str, Callable[[dict], Any]] = {
+        "description": lambda t: t["description"].lower(),
+        "category": lambda t: t["category_path"].lower(),
+        "account": lambda t: (t["account_name"] or "").lower(),
+        "amount": lambda t: t["amount_cents"],
+        "status": lambda t: t["is_active"],
+    }
+    if sort not in keys:
+        raise HTTPException(400, f"Sort must be one of: {', '.join(keys)}")
+    return sorted(rows, key=keys[sort], reverse=desc)
 
 
 def _apply_recurring(tpl: RecurringTemplate, body: RecurringBody) -> None:
     if not body.description.strip():
         raise ValueError("Description and category are required")
-    if not 1 <= body.day_of_month <= 31:
-        raise ValueError("Day of month must be 1-31")
+    if body.schedule is not None:
+        tpl.schedule = validate_schedule(body.schedule)
+    else:
+        if not 1 <= body.day_of_month <= 31:
+            raise ValueError("Day of month must be 1-31")
+        tpl.schedule = None
+    tpl.day_of_month = body.day_of_month
     tpl.description = body.description.strip()
     tpl.category_id = body.category_id
     tpl.account_id = body.account_id
     tpl.amount_cents = to_cents(body.amount)
-    tpl.day_of_month = body.day_of_month
     tpl.is_active = body.is_active
 
 
 @router.get("/recurring")
-def get_recurring(db: Session = Depends(get_db)):
+def get_recurring(sort: str = "description", dir: str = "asc", db: Session = Depends(get_db)):
+    if dir not in ("asc", "desc"):
+        raise HTTPException(400, "dir must be 'asc' or 'desc'")
     tree = category_service.load_tree(db)
-    return [_recurring_out(t, tree) for t in list_templates(db)]
+    rows = [_recurring_out(t, tree) for t in list_templates(db)]
+    return _sort_recurring(rows, sort, dir == "desc")
 
 
 @router.post("/recurring/generate")
@@ -527,15 +637,19 @@ def copy_previous_budget(month: str, db: Session = Depends(get_db)):
 
 
 @router.get("/reports")
-def get_report(db: Session = Depends(get_db), year: int | None = None, month: int | None = None):
-    """``month`` is 1-12 and only drives the category chart; it defaults to the last month with activity."""
-    today = date.today()
-    y = year or today.year
-    report = reports.budget_report(db, y)
-    default_month = report.last_active_month if report.last_active_month is not None else today.month - 1
-    m = min(max((month or default_month + 1) - 1, 0), 11)
+def get_report(db: Session = Depends(get_db), month: int | None = None, as_of: date | None = None):
+    """Rolling report over the last ``WINDOW_MONTHS`` months.
+
+    ``month`` is a 1-based position in that window and only drives the category chart; it defaults
+    to the last month with activity. ``as_of`` pins the end of the window instead of today.
+    """
+    anchor = as_of or date.today()
+    report = reports.budget_report(db, as_of=anchor)
+    n = len(report.window)
+    default = (report.last_active_index + 1) if report.last_active_index is not None else n
+    m = min(max((month or default) - 1, 0), n - 1)
     return {
-        "year": y,
+        "months": report.months,
         "month": m + 1,
         "net_months": report.net_months,
         "expense_budget": report.expense_budget,

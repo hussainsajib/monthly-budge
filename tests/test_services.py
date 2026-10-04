@@ -19,13 +19,15 @@ def test_report_rolls_up_children_and_ignores_future(db, ids):
         _add(db, costco.id, 10000, date(2026, 5, 3))
         _add(db, cats["Grocery"], 5000, date(2026, 5, 4))
         _add(db, cats["Grocery"], 7000, date(2026, 6, 4))
-        _add(db, cats["Grocery"], 9999, date(2026, 12, 30))  # planned: excluded
-        report = reports.budget_report(db, 2026, as_of=date(2026, 6, 30))
+        _add(db, cats["Grocery"], 9999, date(2026, 12, 30))  # planned: outside the window
+        report = reports.budget_report(db, as_of=date(2026, 6, 30))
         row = {r.name: r for r in report.rows}
-        assert row["Grocery"].months[4] == 15000  # own + Costco
-        assert row["Costco"].months[4] == 10000
-        assert row["Grocery"].months[11] == 0
-        assert report.active_months == [4, 5]
+        assert report.months == ["2026-03", "2026-04", "2026-05", "2026-06"]  # rolling 4 months
+        assert row["Grocery"].months[2] == 15000  # own + Costco, in May
+        assert row["Costco"].months[2] == 10000
+        assert row["Grocery"].months[3] == 7000
+        assert row["Grocery"].months[0] == 0
+        assert report.active == [2, 3]
         assert row["Grocery"].avg == 11000
         assert row["Essential Variable"].total == 22000
         assert row["Grocery"].budget == 20000  # sum of children
@@ -35,12 +37,23 @@ def test_report_rolls_up_children_and_ignores_future(db, ids):
         category_service.delete_category(db, costco.id)
 
 
+def test_report_window_rolls_and_clips_the_current_month(db, ids):
+    cats, _ = ids
+    _add(db, cats["Grocery"], 4000, date(2026, 12, 8))
+    _add(db, cats["Grocery"], 1000, date(2027, 1, 5))
+    _add(db, cats["Grocery"], 2000, date(2027, 1, 25))  # future-dated: excluded
+    report = reports.budget_report(db, as_of=date(2027, 1, 10))
+    assert report.months == ["2026-10", "2026-11", "2026-12", "2027-01"]
+    row = next(r for r in report.rows if r.name == "Grocery")
+    assert row.months == [0, 0, 4000, 1000]
+
+
 def test_income_counts_toward_net(db, ids):
     cats, _ = ids
     _add(db, cats["Salary (net)"], 300000, date(2026, 5, 1))
     _add(db, cats["Rent"], 100000, date(2026, 5, 2))
-    report = reports.budget_report(db, 2026, as_of=date(2026, 5, 31))
-    assert report.net_months[4] == 200000
+    report = reports.budget_report(db, as_of=date(2026, 5, 31))
+    assert report.net_months[3] == 200000  # May is the last month of the window
 
 
 def test_cashflow_running_balance_and_planned(db, ids):

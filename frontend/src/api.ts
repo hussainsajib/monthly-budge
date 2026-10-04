@@ -74,9 +74,11 @@ export const api = {
   deleteCategory: (id: number, moveTo: number | null) =>
     del(`/categories/${id}${qs({ move_to_id: moveTo })}`),
 
-  accounts: () => get<Account[]>('/accounts'),
+  accounts: (params: Record<string, string | number | null | undefined> = {}) =>
+    get<Account[]>(`/accounts${qs(params)}`),
   createAccount: (b: AccountBody) => post<Account>('/accounts', b),
   updateAccount: (id: number, b: AccountBody) => put<Account>(`/accounts/${id}`, b),
+  deleteAccount: (id: number) => del(`/accounts/${id}`),
 
   transactions: (filters: Record<string, string | number | null | undefined>) =>
     get<TxnPage>(`/transactions${qs(filters)}`),
@@ -90,7 +92,8 @@ export const api = {
     post<{ moved: number }>('/transactions/bulk-category', { ids, category_id: categoryId }),
   suggest: (q: string) => get<Suggestion | null>(`/suggest${qs({ q })}`),
 
-  recurring: () => get<Recurring[]>('/recurring'),
+  recurring: (params: Record<string, string | number | null | undefined> = {}) =>
+    get<Recurring[]>(`/recurring${qs(params)}`),
   createRecurring: (b: RecurringBody) => post<{ id: number }>('/recurring', b),
   updateRecurring: (id: number, b: RecurringBody) => put<{ id: number }>(`/recurring/${id}`, b),
   deleteRecurring: (id: number) => del(`/recurring/${id}`),
@@ -105,7 +108,7 @@ export const api = {
     put<{ ok: boolean }>(`/budget/${month}/${categoryId}`, { amount }),
   copyPreviousBudget: (month: string) => post<{ changed: number }>(`/budget/${month}/copy-previous`),
 
-  report: (year: number, month: number | null) => get<Report>(`/reports${qs({ year, month })}`),
+  report: (month: number | null) => get<Report>(`/reports${qs({ month })}`),
   cashflow: (accountId: number | null) => get<Cashflow>(`/cashflow${qs({ account_id: accountId })}`),
   setThresholds: (low: string, warn: string) =>
     put<{ low_balance_cents: number; warn_balance_cents: number }>('/settings/thresholds', { low, warn }),

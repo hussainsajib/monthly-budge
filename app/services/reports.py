@@ -1,4 +1,8 @@
-"""Budget Tracker report: category tree x month actuals vs. monthly budget."""
+"""Budget Tracker report: category tree x month actuals vs. monthly budget.
+
+The window is the rolling last ``WINDOW_MONTHS`` calendar months (ending with the current
+one) rather than a calendar year, so the report is always current without navigation.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.models import EXPENSE, INCOME, Transaction
 from app.services.categories import Node, load_tree
 
-MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+WINDOW_MONTHS = 4
 
 
 @dataclass
@@ -42,8 +46,8 @@ class ReportRow:
 
 @dataclass
 class BudgetReport:
-    year: int
-    active_months: list[int]  # 0-based month indexes that have any activity
+    window: list[date]  # first-of-month dates, oldest -> newest
+    active: list[int]  # indexes into the window that have any activity
     rows: list[ReportRow]
     expense_months: list[int]
     income_months: list[int]
@@ -52,16 +56,21 @@ class BudgetReport:
     income_budget: int
 
     @property
+    def months(self) -> list[str]:
+        """'YYYY-MM' labels for the window, oldest -> newest."""
+        return [d.strftime("%Y-%m") for d in self.window]
+
+    @property
     def n_active(self) -> int:
-        return len(self.active_months)
+        return len(self.active)
 
     @property
     def avg_expense(self) -> int:
         return _average(sum(self.expense_months), self.n_active)
 
     @property
-    def last_active_month(self) -> int | None:
-        return self.active_months[-1] if self.active_months else None
+    def last_active_index(self) -> int | None:
+        return self.active[-1] if self.active else None
 
 
 def _average(total: int, n: int) -> int:
@@ -72,22 +81,40 @@ def _add(a: list[int], b: list[int]) -> list[int]:
     return [x + y for x, y in zip(a, b, strict=True)]
 
 
-def budget_report(db: Session, year: int, as_of: date | None = None) -> BudgetReport:
-    """Aggregate actuals for ``year``. Future-dated (planned) rows are excluded."""
+def _shift_month(month: date, delta: int) -> date:
+    """First of the month ``delta`` months after (or before, if negative) ``month``."""
+    index = month.year * 12 + (month.month - 1) + delta
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def rolling_window(as_of: date, months: int = WINDOW_MONTHS) -> list[date]:
+    """First-of-month dates for the ``months`` calendar months ending with ``as_of``'s month."""
+    first = _shift_month(date(as_of.year, as_of.month, 1), -(months - 1))
+    return [_shift_month(first, i) for i in range(months)]
+
+
+def budget_report(db: Session, window_months: int = WINDOW_MONTHS, as_of: date | None = None) -> BudgetReport:
+    """Aggregate actuals for the rolling window ending in ``as_of``'s month.
+
+    Future-dated (planned) rows are excluded, and the current month is only counted up to ``as_of``.
+    """
     as_of = as_of or date.today()
-    month = extract("month", Transaction.date)
+    window = rolling_window(as_of, window_months)
+    n = len(window)
+    position = {(d.year * 12 + d.month): i for i, d in enumerate(window)}
+    year, month = extract("year", Transaction.date), extract("month", Transaction.date)
     stmt = (
-        select(Transaction.category_id, month.label("m"), func.sum(Transaction.amount_cents))
-        .where(Transaction.date >= date(year, 1, 1), Transaction.date <= min(date(year, 12, 31), as_of))
-        .group_by(Transaction.category_id, month)
+        select(Transaction.category_id, year.label("y"), month.label("m"), func.sum(Transaction.amount_cents))
+        .where(Transaction.date >= window[0], Transaction.date <= as_of)
+        .group_by(Transaction.category_id, year, month)
     )
-    own: dict[int, list[int]] = defaultdict(lambda: [0] * 12)
+    own: dict[int, list[int]] = defaultdict(lambda: [0] * n)
     active: set[int] = set()
-    for category_id, m, total in db.execute(stmt):
-        own[category_id][int(m) - 1] = int(total)
-        active.add(int(m) - 1)
+    for category_id, y, m, total in db.execute(stmt):
+        i = position[int(y) * 12 + int(m)]
+        own[category_id][i] = int(total)
+        active.add(i)
     active_months = sorted(active)
-    n = len(active_months)
 
     rows: list[ReportRow] = []
 
@@ -95,13 +122,13 @@ def budget_report(db: Session, year: int, as_of: date | None = None) -> BudgetRe
         """Pre-order emit with post-order totals: reserve the slot, fill after children."""
         slot = len(rows)
         rows.append(None)  # type: ignore[arg-type]
-        months = list(own.get(node.id, [0] * 12))
+        months = list(own.get(node.id, [0] * n))
         for child in node.children:
             months = _add(months, build(child))
         cat = node.category
         if cat.is_active or any(months):
             budget = node.effective_budget_cents
-            avg = _average(sum(months), n)
+            avg = _average(sum(months), len(active_months))
             rows[slot] = ReportRow(
                 node.id, node.name, node.depth, cat.kind, bool(node.children), months, budget, avg, avg - budget
             )
@@ -117,7 +144,7 @@ def budget_report(db: Session, year: int, as_of: date | None = None) -> BudgetRe
     roots = [r for r in rows if r.depth == 0]
 
     def totals(kind: str) -> list[int]:
-        out = [0] * 12
+        out = [0] * n
         for r in roots:
             if r.kind == kind:
                 out = _add(out, r.months)
@@ -125,8 +152,8 @@ def budget_report(db: Session, year: int, as_of: date | None = None) -> BudgetRe
 
     expense_months, income_months = totals(EXPENSE), totals(INCOME)
     return BudgetReport(
-        year=year,
-        active_months=active_months,
+        window=window,
+        active=active_months,
         rows=rows,
         expense_months=expense_months,
         income_months=income_months,
@@ -152,7 +179,6 @@ def chart_payload(report: BudgetReport, month_index: int) -> dict:
         reverse=True,
     )[:12]
     return {
-        "months": MONTHS,
         "spending": [dollars(c) for c in report.expense_months],
         "income": [dollars(c) for c in report.income_months],
         "categories": [t[0] for t in top],

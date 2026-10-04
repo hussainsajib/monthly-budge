@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Account, AppSetting, Category, MonthlyBudget, RecurringTemplate, Transaction
 from app.services.categories import KINDS, MAX_DEPTH, Node, load_tree
-from app.services.recurring import list_templates
+from app.services.recurring import list_templates, validate_schedule
 
 FORMAT_VERSION = 1
 Path = tuple[str, ...]
@@ -69,6 +69,7 @@ def export_config(db: Session) -> dict:
             "account": t.account.name if t.account else None,
             "amount_cents": t.amount_cents,
             "day_of_month": t.day_of_month,
+            "schedule": t.schedule,
             "is_active": t.is_active,
         }
         for t in list_templates(db)
@@ -203,7 +204,8 @@ def _apply(db: Session, data: dict) -> dict[str, int]:
             db.add(tpl)
         tpl.account_id = accounts[account_name].id if account_name else None
         tpl.amount_cents = int(entry["amount_cents"])
-        tpl.day_of_month = int(entry["day_of_month"])
+        tpl.day_of_month = int(entry.get("day_of_month", 1))
+        tpl.schedule = validate_schedule(entry["schedule"]) if entry.get("schedule") is not None else None
         tpl.is_active = bool(entry.get("is_active", True))
         counts["recurring"] += 1
 

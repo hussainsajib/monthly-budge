@@ -57,11 +57,10 @@ use the default merge then. The file holds setup only (no transactions); back up
 
 | Page | What it does |
 |------|--------------|
-| **Add** | One-screen entry. Typing a known description autofills category, account and amount; *Repeat* re-uses a recent row; *Add this month's recurring items* creates rent, loan etc. |
-| **Transactions** | Search/filter (a category filter includes its sub-categories), edit, delete, and **bulk move** selected rows to another category. |
+| **Transactions** | Add a new entry at the top (typing a known description autofills category, account and amount; *Add this month's recurring items* creates rent, loan etc.; if `OLLAMA_URL` is set, a new description falls back to a local LLM for the category). Below: search/filter (a category filter includes its sub-categories), edit, delete, and **bulk move** selected rows to another category. The **Import** button opens the CSV importer. |
 | **Import** | Upload a bank/card CSV, then review: filter rows (description, category incl. unassigned, date/month/year, amount), set a category for all shown rows, see possible duplicates, and import. Re-importing the same file is safe. |
 | **Budget** | One month at a time: each lowest-level category's budget (editable for that month only), actual and remaining, totals for income and expenses, and a "left to assign" check. *Copy last month's budget* is one click. |
-| **Report** | Category × month table (parents roll up their sub-categories), vs-budget, net, and two charts. |
+| **Report** | The rolling last 4 months: category × month table (parents roll up their sub-categories), vs-budget, net, and two charts. |
 | **Cash flow** | Running balance per account including future-dated (planned) rows, with red/orange alert levels and the lowest point. Set an opening balance + date under **Settings → Accounts** first. |
 | **Settings** | **Categories** (add, rename, re-parent, default budget, deactivate or delete to four levels; deleting one with transactions asks where to move them), **Accounts**, and **Recurring** items. |
 
@@ -124,4 +123,4 @@ Review the generated file before applying; SQLite migrations run in batch mode.
 * No CSRF protection (fine on localhost; add a token before exposing it, since Basic auth credentials are sent automatically by browsers).
 * Credit-card balances are not modelled: card purchases are tracked as spending, and card payments are
   expenses paid from the chequing account.
-* The report averages over months that have activity; the Excel sheet divided by a fixed 8.
+* The report averages over the months in its 4-month window that have activity; the Excel sheet divided by a fixed 8.

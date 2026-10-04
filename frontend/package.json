@@ -7,13 +7,20 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "lint:design": "node design-guard.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",
+    "@tanstack/react-table": "^8.21.3",
+    "lucide-react": "^1.51.0",
     "react": "^19.3.0",
+    "react-content-loader": "^7.1.2",
     "react-dom": "^19.3.0",
+    "react-paginate": "^8.3.0",
     "react-router-dom": "^7.18.4",
+    "react-select": "^5.10.2",
+    "react-tooltip": "^6.0.8",
     "recharts": "^3.10.1"
   },
   "devDependencies": {

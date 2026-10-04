@@ -14,7 +14,9 @@ export interface Category {
   sort_order: number
   is_active: boolean
   has_children: boolean
+  child_count: number
   transaction_count: number
+  recurring_count: number
 }
 
 export interface Account {
@@ -23,6 +25,9 @@ export interface Account {
   kind: AccountKind
   opening_balance_cents: number
   opening_date: string | null
+  current_balance_cents: number
+  transaction_count: number
+  transacted_cents: number
   is_active: boolean
 }
 
@@ -56,6 +61,19 @@ export interface TxnBody {
   notes: string
 }
 
+export type Schedule = {
+  freq: 'daily' | 'weekly' | 'monthly' | 'yearly'
+  interval: number
+  start: string // ISO date, first occurrence
+  until: string | null // inclusive end date
+  count: number | null // total occurrences
+  by_weekday?: number[] // weekly: 0=Mon..6=Sun
+  by_month_day?: number[] // monthly: days, -1 = last
+  by_nth_weekday?: { week: number; weekday: number } // weekly: 1-5 or -1 = last
+  month?: number // yearly: 1-12
+  day?: number // yearly: 1-31 or -1 = last
+}
+
 export interface Recurring {
   id: number
   description: string
@@ -65,6 +83,7 @@ export interface Recurring {
   account_name: string | null
   amount_cents: number
   day_of_month: number
+  schedule: Schedule | null
   is_active: boolean
 }
 
@@ -74,6 +93,7 @@ export interface RecurringBody {
   account_id: number | null
   amount: string
   day_of_month: number
+  schedule: Schedule | null
   is_active: boolean
 }
 
@@ -109,7 +129,9 @@ export interface ReportRow {
 }
 
 export interface Report {
-  year: number
+  /** Rolling window months as 'YYYY-MM', oldest -> newest. */
+  months: string[]
+  /** 1-based position in ``months`` driving the category chart. */
   month: number
   net_months: number[]
   expense_budget: number
@@ -117,7 +139,6 @@ export interface Report {
   avg_expense: number
   rows: ReportRow[]
   chart: {
-    months: string[]
     spending: number[]
     income: number[]
     categories: string[]

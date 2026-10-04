@@ -34,6 +34,31 @@ def test_categories_are_returned_in_tree_order(client, ids):
     assert [r["id"] for r in rows].index(section["id"]) < [r["id"] for r in rows].index(rent["id"])
 
 
+def test_category_rows_report_child_and_recurring_usage(client, ids):
+    """The UI gates its delete flow on these counts, so they must cover everything the server blocks on."""
+    cats, accs = ids
+    parent_id = cats["Discretionary"]
+    leaf_id = client.post("/api/categories", json={"name": "Counted", "parent_id": parent_id}).json()["id"]
+    tpl_id = client.post(
+        "/api/recurring",
+        json={"description": "Counted rule", "category_id": leaf_id, "account_id": accs["Chequing"], "amount": "5"},
+    ).json()["id"]
+    try:
+        rows = {r["id"]: r for r in client.get("/api/categories").json()}
+        assert rows[parent_id]["child_count"] > 0
+        assert rows[parent_id]["recurring_count"] == 0  # rules only ever attach to leaves
+        assert (rows[leaf_id]["child_count"], rows[leaf_id]["transaction_count"]) == (0, 0)
+        assert rows[leaf_id]["recurring_count"] == 1
+
+        # A recurring rule alone makes the delete unsafe, even with no transactions attached.
+        assert client.delete(f"/api/categories/{leaf_id}").status_code == 400
+        assert client.delete(f"/api/categories/{leaf_id}", params={"move_to_id": cats["Grocery"]}).status_code == 204
+        moved = next(t for t in client.get("/api/recurring").json() if t["id"] == tpl_id)
+        assert moved["category_path"] == "Essential Variable › Grocery"
+    finally:
+        client.delete(f"/api/recurring/{tpl_id}")
+
+
 def test_category_create_update_delete(client, db, ids):
     cats, _ = ids
     res = client.post("/api/categories", json={"name": "Pets", "parent_id": cats["Discretionary"], "budget": "12.50"})
@@ -136,6 +161,18 @@ def test_amount_expressions_and_refunds(client, ids):
     assert res.json()["amount_cents"] == -500
 
 
+def test_transactions_can_be_sorted(client, ids):
+    cats, accs = ids
+    client.post("/api/transactions", json=_txn_body(cats, accs, description="Aaa", amount="10"))
+    client.post("/api/transactions", json=_txn_body(cats, accs, description="Zzz", amount="30"))
+    asc = client.get("/api/transactions", params={"sort": "amount", "dir": "asc"}).json()["items"]
+    assert [t["description"] for t in asc] == ["Aaa", "Zzz"]
+    desc = client.get("/api/transactions", params={"sort": "amount", "dir": "desc"}).json()["items"]
+    assert [t["description"] for t in desc] == ["Zzz", "Aaa"]
+    by_cat = client.get("/api/transactions", params={"sort": "category", "dir": "asc"}).json()["items"]
+    assert len(by_cat) == 2
+
+
 def test_bulk_category(client, ids):
     cats, accs = ids
     ids_ = [client.post("/api/transactions", json=_txn_body(cats, accs)).json()["id"] for _ in range(2)]
@@ -163,6 +200,93 @@ def test_account_create_update_and_duplicate(client, db):
     finally:
         db.execute(delete(Account).where(Account.id == acc_id))
         db.commit()
+
+
+def test_account_delete(client, db):
+    body = {"name": "Delete Me", "kind": "bank", "opening_balance": "5", "opening_date": None}
+    acc_id = client.post("/api/accounts", json=body).json()["id"]
+    assert client.delete(f"/api/accounts/{acc_id}").status_code == 204
+    assert db.get(Account, acc_id) is None
+    assert client.delete(f"/api/accounts/{acc_id}").status_code == 204  # deleting again is a no-op
+
+
+def test_account_stats(client, ids):
+    cats, accs = ids
+    body = {"name": "Stats Acct", "kind": "bank", "opening_balance": "100", "opening_date": "2026-01-01"}
+    acc_id = client.post("/api/accounts", json=body).json()["id"]
+    try:
+        client.post("/api/transactions", json=_txn_body(cats, accs, date="2026-05-04", account_id=acc_id))
+        row = next(a for a in client.get("/api/accounts").json() if a["id"] == acc_id)
+        assert row["current_balance_cents"] == 10000 - 3955
+        assert row["transaction_count"] == 1
+        assert row["transacted_cents"] == 3955
+    finally:
+        client.delete(f"/api/accounts/{acc_id}")
+
+
+def test_accounts_sort_by_balance(client, db):
+    made = {}
+    seeds = [("Sort Zeta", "bank", "10"), ("Sort Alpha", "cash", "300"), ("Sort Mid", "credit", "100")]
+    for name, kind, balance in seeds:
+        res = client.post("/api/accounts", json={"name": name, "kind": kind, "opening_balance": balance})
+        made[name] = res.json()["id"]
+    try:
+        def balances(**params):
+            rows = client.get("/api/accounts", params={"include_inactive": False, **params}).json()
+            return [(r["name"], r["current_balance_cents"]) for r in rows if r["id"] in made.values()]
+
+        def names(**params):
+            return [n for n, _ in balances(**params)]
+
+        assert balances(sort="balance", dir="asc") == [("Sort Zeta", 1000), ("Sort Mid", 10000), ("Sort Alpha", 30000)]
+        assert balances(sort="balance", dir="desc") == list(reversed(balances(sort="balance", dir="asc")))
+        assert names(sort="name", dir="asc") == ["Sort Alpha", "Sort Mid", "Sort Zeta"]
+        assert names(sort="name", dir="desc") == list(reversed(names(sort="name", dir="asc")))
+        assert names() == ["Sort Alpha", "Sort Mid", "Sort Zeta"]  # name asc is the default
+        assert client.get("/api/accounts", params={"sort": "nope"}).status_code == 400
+        assert client.get("/api/accounts", params={"dir": "sideways"}).status_code == 400
+    finally:
+        for acc_id in made.values():
+            client.delete(f"/api/accounts/{acc_id}")
+
+
+def test_recurring_sort(client, db, ids):
+    cats, accs = ids
+    made = {}
+    for desc, category, account, amount in [
+        ("Sort Zeta", cats["Rent"], accs["Chequing"], "10"),
+        ("Sort Alpha", cats["Grocery"], accs["Savings"], "300"),
+        ("Sort Mid", cats["Rent"], accs["Savings"], "100"),
+    ]:
+        body = {
+            "description": desc,
+            "category_id": category,
+            "account_id": account,
+            "amount": amount,
+            "day_of_month": 1,
+        }
+        made[desc] = client.post("/api/recurring", json=body).json()["id"]
+    try:
+        def rows(**params):
+            return [
+                (t["description"], t["amount_cents"])
+                for t in client.get("/api/recurring", params=params).json()
+                if t["id"] in made.values()
+            ]
+
+        def names(**params):
+            return [d for d, _ in rows(**params)]
+
+        assert rows(sort="amount", dir="asc") == [("Sort Zeta", 1000), ("Sort Mid", 10000), ("Sort Alpha", 30000)]
+        assert rows(sort="amount", dir="desc") == list(reversed(rows(sort="amount", dir="asc")))
+        assert names(sort="description", dir="asc") == ["Sort Alpha", "Sort Mid", "Sort Zeta"]
+        assert names(sort="description", dir="desc") == list(reversed(names(sort="description", dir="asc")))
+        assert names() == ["Sort Alpha", "Sort Mid", "Sort Zeta"]  # description asc is the default
+        assert client.get("/api/recurring", params={"sort": "nope"}).status_code == 400
+        assert client.get("/api/recurring", params={"dir": "sideways"}).status_code == 400
+    finally:
+        for tpl_id in made.values():
+            client.delete(f"/api/recurring/{tpl_id}")
 
 
 def test_recurring_crud_and_generate(client, db, ids):
@@ -197,6 +321,32 @@ CSV = (
     "2026-03-01,FRESH MART #123,45.10\n"
     "2026-03-02,PAYCHEQUE,-500.00\n"
 )
+
+
+def test_recurring_schedule_generation(client, ids):
+    cats, accs = ids
+    body = {
+        "description": "Biweekly gas",
+        "category_id": cats["Grocery"],
+        "account_id": accs["Chequing"],
+        "amount": "10",
+        "schedule": {"freq": "weekly", "interval": 2, "start": "2026-01-05", "by_weekday": [0]},
+        "is_active": True,
+    }
+    tpl_id = client.post("/api/recurring", json=body).json()["id"]
+    try:
+        listed = next(t for t in client.get("/api/recurring").json() if t["id"] == tpl_id)
+        assert listed["schedule"] == body["schedule"]
+        assert client.post("/api/recurring/generate", json={"month": "2026-02"}).json()["created"] >= 2
+        feb = client.get("/api/transactions", params={"q": "Biweekly gas"}).json()["items"]
+        assert sorted(t["date"] for t in feb) == ["2026-02-02", "2026-02-16"]
+        assert client.post("/api/recurring/generate", json={"month": "2026-02"}).json()["created"] == 0  # idempotent
+        bad = client.post(
+            "/api/recurring", json=body | {"schedule": {"freq": "monthly", "interval": 1, "start": "2026-01-01"}}
+        )
+        assert bad.status_code == 400
+    finally:
+        client.delete(f"/api/recurring/{tpl_id}")
 
 
 def test_import_preview_and_commit_are_idempotent(client, ids):
@@ -237,12 +387,13 @@ def test_import_rejects_unreadable_files(client):
 def test_report_and_cashflow_shapes(client, ids):
     cats, accs = ids
     client.post("/api/transactions", json=_txn_body(cats, accs, date="2026-05-04"))
-    report = client.get("/api/reports", params={"year": 2026}).json()
-    assert report["year"] == 2026
-    assert report["month"] == 5  # defaults to the last month with activity
+    report = client.get("/api/reports", params={"as_of": "2026-05-15"}).json()
+    assert report["months"] == ["2026-02", "2026-03", "2026-04", "2026-05"]  # rolling window
+    assert report["month"] == 4  # defaults to the last month with activity
     assert report["chart"]["categories"] == ["Dining Out / Takeout"]
     row = next(r for r in report["rows"] if r["category_id"] == cats["Dining Out / Takeout"])
-    assert row["months"][4] == 3955 and len(row["months"]) == 12
+    assert row["months"] == [0, 0, 0, 3955]
+    assert client.get("/api/reports", params={"as_of": "2026-05-15", "month": 2}).json()["month"] == 2
 
     flow = client.get("/api/cashflow", params={"account_id": accs["Chequing"]}).json()
     assert flow["account"]["name"] == "Chequing"
