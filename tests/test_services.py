@@ -1,7 +1,7 @@
 from datetime import date
 
 from app.models import Account, Transaction
-from app.services import cashflow, importing, recurring, reports, suggestions
+from app.services import cashflow, importing, reports, suggestions
 from app.services import categories as category_service
 
 
@@ -22,12 +22,12 @@ def test_report_rolls_up_children_and_ignores_future(db, ids):
         _add(db, cats["Grocery"], 9999, date(2026, 12, 30))  # planned: outside the window
         report = reports.budget_report(db, as_of=date(2026, 6, 30))
         row = {r.name: r for r in report.rows}
-        assert report.months == ["2026-03", "2026-04", "2026-05", "2026-06"]  # rolling 4 months
-        assert row["Grocery"].months[2] == 15000  # own + Costco, in May
-        assert row["Costco"].months[2] == 10000
-        assert row["Grocery"].months[3] == 7000
+        assert report.months == ["2026-04", "2026-05", "2026-06"]  # rolling 3 months
+        assert row["Grocery"].months[1] == 15000  # own + Costco, in May
+        assert row["Costco"].months[1] == 10000
+        assert row["Grocery"].months[2] == 7000
         assert row["Grocery"].months[0] == 0
-        assert report.active == [2, 3]
+        assert report.active == [1, 2]
         assert row["Grocery"].avg == 11000
         assert row["Essential Variable"].total == 22000
         assert row["Grocery"].budget == 20000  # sum of children
@@ -43,9 +43,9 @@ def test_report_window_rolls_and_clips_the_current_month(db, ids):
     _add(db, cats["Grocery"], 1000, date(2027, 1, 5))
     _add(db, cats["Grocery"], 2000, date(2027, 1, 25))  # future-dated: excluded
     report = reports.budget_report(db, as_of=date(2027, 1, 10))
-    assert report.months == ["2026-10", "2026-11", "2026-12", "2027-01"]
+    assert report.months == ["2026-11", "2026-12", "2027-01"]
     row = next(r for r in report.rows if r.name == "Grocery")
-    assert row.months == [0, 0, 4000, 1000]
+    assert row.months == [0, 4000, 1000]
 
 
 def test_income_counts_toward_net(db, ids):
@@ -53,7 +53,7 @@ def test_income_counts_toward_net(db, ids):
     _add(db, cats["Salary (net)"], 300000, date(2026, 5, 1))
     _add(db, cats["Rent"], 100000, date(2026, 5, 2))
     report = reports.budget_report(db, as_of=date(2026, 5, 31))
-    assert report.net_months[3] == 200000  # May is the last month of the window
+    assert report.net_months[2] == 200000  # May is the last month of the window
 
 
 def test_cashflow_running_balance_and_planned(db, ids):
@@ -78,12 +78,14 @@ def test_cashflow_running_balance_and_planned(db, ids):
         db.commit()
 
 
-def test_recurring_generation_is_idempotent(db):
-    first = recurring.generate_for_month(db, 2026, 2)
-    assert first == 5
-    assert recurring.generate_for_month(db, 2026, 2) == 0
-    feb = db.query(Transaction).filter(Transaction.date.between(date(2026, 2, 1), date(2026, 2, 28))).count()
-    assert feb == 5
+def test_recurring_lands_in_separate_budget_slot(db):
+    from app.services import budgets
+
+    rent = next(line for line in budgets.build_month(db, date(2026, 2, 1)).lines if line.name == "Rent")
+    assert rent.recurring_cents == 150000  # seeded Rent recurring, once a month
+    assert rent.budget_cents == rent.default_cents  # recurring is shown separately, not folded into budget
+    assert rent.actual_cents == 0
+    assert db.query(Transaction).filter(Transaction.date.between(date(2026, 2, 1), date(2026, 2, 28))).count() == 0
 
 
 def test_suggestions_exact_and_noisy_match(db, ids):

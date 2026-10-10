@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Account, Transaction
+from app.services.category_config import income_keys
 from app.services.reference import LOW_BALANCE_KEY, WARN_BALANCE_KEY, get_int_setting
 
 
@@ -44,8 +45,9 @@ def build_ledger(db: Session, account: Account, today: date | None = None) -> Le
     balance = account.opening_balance_cents
     current = balance
     rows: list[LedgerRow] = []
+    income = income_keys(db)
     for txn in db.scalars(stmt).unique():
-        delta = txn.cash_delta_cents
+        delta = txn.cash_delta_cents(txn.category.kind in income)
         balance += delta
         planned = txn.date > today
         if not planned:

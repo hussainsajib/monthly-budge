@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import { Loading } from '../components/ui'
@@ -107,54 +107,54 @@ export default function ReportsPage() {
 
           <h2>Category × month</h2>
           <div className="card table-wrap">
-            <table>
+            <table className="report-table">
               <thead>
                 <tr>
-                  <th>Category</th>
-                  <th className="num">Budget/mo</th>
+                  <th rowSpan={2}>Category</th>
                   {r.months.map((m) => (
-                    <th key={m} className="num">
+                    <th key={m} className="num" colSpan={2}>
                       {monthLabel(m, withYear)}
                     </th>
                   ))}
-                  <th className="num">Total</th>
-                  <th className="num">Avg</th>
-                  <th className="num">vs Budget</th>
+                </tr>
+                <tr>
+                  {r.months.map((m) => (
+                    <Fragment key={m}>
+                      <th className="num sub">Budget</th>
+                      <th className="num sub">Actual</th>
+                    </Fragment>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {r.rows.map((row) => (
                   <tr key={row.category_id} className={row.depth === 0 ? 'root' : ''}>
                     <td style={{ paddingLeft: 10 + row.depth * 18 }}>{row.name}</td>
-                    <td className="num">{formatMoney(row.budget, true)}</td>
                     {row.months.map((c, i) => (
-                      <td key={i} className="num">
-                        {formatMoney(c, true)}
-                      </td>
+                      <Fragment key={i}>
+                        <td className="num muted">{formatMoney(row.budgets[i], true)}</td>
+                        <td className={`num ${tone(c, row.budgets[i], !row.is_income)}`}>
+                          {formatMoney(c, true)}
+                        </td>
+                      </Fragment>
                     ))}
-                    <td className="num">{formatMoney(row.total, true)}</td>
-                    <td className="num">{formatMoney(row.avg, true)}</td>
-                    <td className={`num ${row.status}`}>{formatMoney(row.variance, true)}</td>
                   </tr>
                 ))}
                 <tr className="root">
                   <td>NET (income − expenses)</td>
-                  <td className="num">{formatMoney(r.income_budget - r.expense_budget)}</td>
                   {r.net_months.map((c, i) => (
-                    <td key={i} className="num">
-                      {formatMoney(c, true)}
-                    </td>
+                    <Fragment key={i}>
+                      <td className="num muted">{formatMoney(r.net_budgets[i], true)}</td>
+                      <td className={`num ${tone(c, r.net_budgets[i], false)}`}>{formatMoney(c, true)}</td>
+                    </Fragment>
                   ))}
-                  <td className="num">{formatMoney(sum(r.net_months))}</td>
-                  <td></td>
-                  <td></td>
                 </tr>
               </tbody>
             </table>
           </div>
           <p className="small muted">
-            vs Budget = average of months with activity − monthly budget (for expenses, positive means over budget).
-            Parent budgets are the sum of their sub-categories. Future-dated entries are excluded.
+            Budget is the effective monthly budget (defaults plus any override for that month); Actual excludes
+            future-dated entries. Parent budgets are the sum of their sub-categories.
           </p>
         </>
       )}
@@ -163,6 +163,13 @@ export default function ReportsPage() {
 }
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+
+/** 'over' (red) when in the red, 'under' (green) when ahead, '' when equal. expense=true means over budget is bad. */
+const tone = (actual: number, budget: number, expense = true) => {
+  if (actual === budget) return ''
+  const good = expense ? actual < budget : actual > budget
+  return good ? 'under' : 'over'
+}
 
 const tooltipStyle = {
   background: 'var(--surface)',

@@ -13,8 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.money import to_cents
-from app.models import EXPENSE, Category, Transaction
+from app.models import Category, Transaction
 from app.services import suggestions
+from app.services.category_config import income_keys
 
 DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d", "%d-%b-%Y", "%b %d, %Y", "%m/%d/%y")
 DATE_HEADERS = ("date", "transaction date", "posted date", "posting date")
@@ -150,14 +151,15 @@ def prepare_preview(db: Session, rows: list[ParsedRow], account_id: int | None) 
     return rows
 
 
-def signed_amount(direction: str, category_kind: str, cents: int) -> int:
+def signed_amount(direction: str, is_income: bool, cents: int) -> int:
     """Money in on an expense category (refund) or money out on income is stored negative."""
-    natural = "out" if category_kind == EXPENSE else "in"
+    natural = "in" if is_income else "out"
     return cents if direction == natural else -cents
 
 
 def commit_rows(db: Session, rows: list[ParsedRow], account_id: int | None) -> int:
     kinds = {c.id: c.kind for c in db.scalars(select(Category))}
+    income = income_keys(db)
     for row in rows:
         db.add(
             Transaction(
@@ -165,7 +167,7 @@ def commit_rows(db: Session, rows: list[ParsedRow], account_id: int | None) -> i
                 description=row.description[:200],
                 category_id=row.category_id,
                 account_id=account_id,
-                amount_cents=signed_amount(row.direction, kinds[row.category_id], row.amount_cents),
+                amount_cents=signed_amount(row.direction, kinds[row.category_id] in income, row.amount_cents),
                 import_hash=row.key,
             )
         )

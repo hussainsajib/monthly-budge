@@ -59,7 +59,7 @@ export default function TxnForm({ initial, submitLabel, onSubmit, descriptions, 
 
   return (
     <form className={`card${big ? ' big-form' : ''}`} onSubmit={submit}>
-      <div className="grid">
+      <div className="grid txn-grid">
         <div>
           <label htmlFor="f-desc">Description</label>
           <input

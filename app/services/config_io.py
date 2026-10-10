@@ -14,7 +14,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Account, AppSetting, Category, MonthlyBudget, RecurringTemplate, Transaction
-from app.services.categories import KINDS, MAX_DEPTH, Node, load_tree
+from app.services.account_config import ensure_account_config
+from app.services.categories import MAX_DEPTH, Node, load_tree
+from app.services.category_config import ensure_category_config, type_keys
 from app.services.recurring import list_templates, validate_schedule
 
 FORMAT_VERSION = 1
@@ -38,6 +40,8 @@ def _names(node: Node) -> list[str]:
 
 
 def export_config(db: Session) -> dict:
+    ensure_category_config(db)
+    ensure_account_config(db)
     tree = load_tree(db)
     path_of = {node_id: _names(node) for node_id, node in tree.nodes.items()}
 
@@ -149,8 +153,8 @@ def _apply(db: Session, data: dict) -> dict[str, int]:
             raise ConfigError(f"Bad category path: {entry['path']!r}")
         if len(path) > MAX_DEPTH:
             raise ConfigError(f"{' › '.join(path)}: nested more than {MAX_DEPTH} levels")
-        if entry["kind"] not in KINDS:
-            raise ConfigError(f"{' › '.join(path)}: kind must be expense or income")
+        if entry["kind"] not in type_keys(db):
+            raise ConfigError(f"{' › '.join(path)}: unknown category kind {entry['kind']!r}")
         parent = by_path.get(path[:-1]) if len(path) > 1 else None
         if len(path) > 1 and parent is None:
             raise ConfigError(f"{' › '.join(path)}: its parent must appear earlier in the file")

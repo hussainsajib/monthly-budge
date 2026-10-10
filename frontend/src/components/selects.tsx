@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import Select, { type StylesConfig } from 'react-select'
+import { levelsOf } from '../categoryConfig'
+import { useCategoryConfig } from '../queries'
 import type { Account, Category } from '../types'
 
 /** Deepest level a category can have a child under (server MAX_DEPTH is 4 levels: depth 0..3). */
@@ -117,6 +119,7 @@ export function CategorySelect({
   showLabels = true,
 }: CategorySelectProps) {
   const parentMode = mode === 'parent'
+  const levels = levelsOf(useCategoryConfig().data)
   const sections = categories.filter((c) => c.depth === 0)
   const [sectionId, setSectionId] = useState<number | null>(() => rootOf(categories, value))
 
@@ -158,7 +161,7 @@ export function CategorySelect({
 
   return (
     <span className="cat-pair">
-      <PairCol htmlFor={id} label={showLabels ? (parentMode ? 'Section' : 'Category') : undefined}>
+      <PairCol htmlFor={id} label={showLabels ? levels[0] : undefined}>
         <Select
           inputId={id}
           classNamePrefix="rs"
@@ -173,7 +176,7 @@ export function CategorySelect({
           onChange={onSectionChange}
         />
       </PairCol>
-      <PairCol htmlFor={id ? `${id}-sub` : undefined} label={showLabels ? 'Sub-category' : undefined}>
+      <PairCol htmlFor={id ? `${id}-sub` : undefined} label={showLabels ? levels[1] : undefined}>
         <Select
           inputId={id ? `${id}-sub` : undefined}
           classNamePrefix="rs"
@@ -204,6 +207,7 @@ interface CategoryFilterProps {
 
 /** Two cascading selects for the Transactions / Import filters (a whole category matches its sub-categories). */
 export function CategoryFilter({ categories, value, onChange, unassigned = false, id }: CategoryFilterProps) {
+  const levels = levelsOf(useCategoryConfig().data)
   const sections = categories.filter((c) => c.depth === 0)
   const [sectionId, setSectionId] = useState<number | null>(() =>
     rootOf(categories, value && value !== 'none' ? Number(value) : null),
@@ -243,7 +247,7 @@ export function CategoryFilter({ categories, value, onChange, unassigned = false
 
   return (
     <span className="cat-pair">
-      <PairCol htmlFor={id} label="Category">
+      <PairCol htmlFor={id} label={levels[0]}>
         <Select
           inputId={id}
           classNamePrefix="rs"
@@ -259,7 +263,7 @@ export function CategoryFilter({ categories, value, onChange, unassigned = false
           onChange={onSectionChange}
         />
       </PairCol>
-      <PairCol htmlFor={id ? `${id}-sub` : undefined} label="Sub-category">
+      <PairCol htmlFor={id ? `${id}-sub` : undefined} label={levels[1]}>
         <Select
           inputId={id ? `${id}-sub` : undefined}
           classNamePrefix="rs"

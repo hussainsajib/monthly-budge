@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.models import EXPENSE, INCOME, Category, RecurringTemplate, Transaction
+from app.models import EXPENSE, Category, RecurringTemplate, Transaction
+from app.services.category_config import type_keys
 
-KINDS = (EXPENSE, INCOME)
 MAX_DEPTH = 4  # section > category > sub-category > sub-sub-category
 
 
@@ -131,8 +131,8 @@ def create_category(
         if parent.depth + 1 >= MAX_DEPTH:
             raise CategoryError(f"Categories can only be nested {MAX_DEPTH} levels deep")
         kind = parent.category.kind
-    elif kind not in KINDS:
-        raise CategoryError("Kind must be expense or income")
+    elif kind not in type_keys(db):
+        raise CategoryError("Pick a valid category type")
     _check_unique(db, name, parent_id)
     cat = Category(
         name=name,
@@ -175,8 +175,8 @@ def update_category(
         if new_parent.depth + 1 + subtree_height >= MAX_DEPTH:
             raise CategoryError(f"Categories can only be nested {MAX_DEPTH} levels deep")
         kind = new_parent.category.kind
-    elif kind not in KINDS:
-        raise CategoryError("Kind must be expense or income")
+    elif kind not in type_keys(db):
+        raise CategoryError("Pick a valid category type")
 
     _check_unique(db, name, parent_id, exclude_id=category_id)
     cat = node.category

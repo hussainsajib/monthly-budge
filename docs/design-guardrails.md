@@ -18,11 +18,10 @@ it. The full reasoning and a generic checklist live in the global
   steps, never for buttons or cards.
 - **Money:** `font-variant-numeric: tabular-nums` everywhere amounts appear
   (`td.num` / `.num`, `.stat`, `.money`, `.tile-value`, `.budget-input`).
-- **Type pairing:** Georgia serif display (`--font-display`) for headings and the
-  brand; `system-ui` body (`--font-body`) everywhere else, numerals included
-  (`--font-money` aliases `--font-body`, so figures match the text around them —
-  `tabular-nums` keeps columns aligned). Add fonts as `--font-*` tokens in
-  `styles.css`, never inline in components.
+- **Typography:** one font throughout — `system-ui` (`--font-body`), headings and the
+  brand included. Numerals use `--font-money`, which aliases `--font-body`, so figures
+  match the text around them; `tabular-nums` keeps columns aligned. Add fonts as
+  `--font-*` tokens in `styles.css`, never inline in components.
 - **Loading:** skeleton rows via `react-content-loader` (`Bar` in
   `components/table.tsx`), never "Loading…" text.
 - **Icons:** `lucide-react` named imports. No emoji.

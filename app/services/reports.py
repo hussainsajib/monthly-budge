@@ -13,10 +13,12 @@ from datetime import date
 from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
-from app.models import EXPENSE, INCOME, Transaction
+from app.models import Transaction
+from app.services import budgets
 from app.services.categories import Node, load_tree
+from app.services.category_config import income_keys
 
-WINDOW_MONTHS = 4
+WINDOW_MONTHS = 3
 
 
 @dataclass
@@ -25,9 +27,11 @@ class ReportRow:
     name: str
     depth: int
     kind: str
+    is_income: bool
     has_children: bool
-    months: list[int]  # rolled up: own + all descendants
-    budget: int  # effective monthly budget
+    months: list[int]  # rolled up actuals: own + all descendants
+    budgets: list[int]  # rolled up per-month budgets: own + all descendants
+    budget: int  # effective default monthly budget
     avg: int
     variance: int  # avg - budget (for expenses, positive = over budget)
 
@@ -40,7 +44,7 @@ class ReportRow:
         """CSS class: 'over' / 'under' relative to what is good for this kind."""
         if self.variance == 0:
             return ""
-        good = self.variance < 0 if self.kind == EXPENSE else self.variance > 0
+        good = self.variance > 0 if self.is_income else self.variance < 0
         return "under" if good else "over"
 
 
@@ -52,8 +56,11 @@ class BudgetReport:
     expense_months: list[int]
     income_months: list[int]
     net_months: list[int]
+    expense_budgets: list[int]
+    income_budgets: list[int]
     expense_budget: int
     income_budget: int
+    type_totals: dict[str, dict[str, int]]  # type key -> {"months": total, "budget": cents}
 
     @property
     def months(self) -> list[str]:
@@ -102,6 +109,7 @@ def budget_report(db: Session, window_months: int = WINDOW_MONTHS, as_of: date |
     window = rolling_window(as_of, window_months)
     n = len(window)
     position = {(d.year * 12 + d.month): i for i, d in enumerate(window)}
+    per_month_budgets = [budgets.effective_budgets(db, d) for d in window]
     year, month = extract("year", Transaction.date), extract("month", Transaction.date)
     stmt = (
         select(Transaction.category_id, year.label("y"), month.label("m"), func.sum(Transaction.amount_cents))
@@ -117,24 +125,41 @@ def budget_report(db: Session, window_months: int = WINDOW_MONTHS, as_of: date |
     active_months = sorted(active)
 
     rows: list[ReportRow] = []
+    income = income_keys(db)
 
-    def build(node: Node) -> list[int]:
+    def build(node: Node) -> tuple[list[int], list[int]]:
         """Pre-order emit with post-order totals: reserve the slot, fill after children."""
         slot = len(rows)
         rows.append(None)  # type: ignore[arg-type]
         months = list(own.get(node.id, [0] * n))
+        if node.children:
+            node_budgets = [0] * n
+        else:
+            node_budgets = [per_month_budgets[i].get(node.id, 0) for i in range(n)]
         for child in node.children:
-            months = _add(months, build(child))
+            child_months, child_budgets = build(child)
+            months = _add(months, child_months)
+            node_budgets = _add(node_budgets, child_budgets)
         cat = node.category
         if cat.is_active or any(months):
             budget = node.effective_budget_cents
             avg = _average(sum(months), len(active_months))
             rows[slot] = ReportRow(
-                node.id, node.name, node.depth, cat.kind, bool(node.children), months, budget, avg, avg - budget
+                node.id,
+                node.name,
+                node.depth,
+                cat.kind,
+                cat.kind in income,
+                bool(node.children),
+                months,
+                node_budgets,
+                budget,
+                avg,
+                avg - budget,
             )
         else:
             rows[slot] = None  # type: ignore[assignment]
-        return months
+        return months, node_budgets
 
     tree = load_tree(db)
     for root in tree.roots:
@@ -143,14 +168,20 @@ def budget_report(db: Session, window_months: int = WINDOW_MONTHS, as_of: date |
 
     roots = [r for r in rows if r.depth == 0]
 
-    def totals(kind: str) -> list[int]:
+    def totals(flow_in: bool, attr: str) -> list[int]:
         out = [0] * n
         for r in roots:
-            if r.kind == kind:
-                out = _add(out, r.months)
+            if r.is_income == flow_in:
+                out = _add(out, getattr(r, attr))
         return out
 
-    expense_months, income_months = totals(EXPENSE), totals(INCOME)
+    type_totals: dict[str, dict[str, int]] = {}
+    for r in roots:
+        slot = type_totals.setdefault(r.kind, {"months": 0, "budget": 0})
+        slot["months"] += r.total
+        slot["budget"] += r.budget
+
+    expense_months, income_months = totals(False, "months"), totals(True, "months")
     return BudgetReport(
         window=window,
         active=active_months,
@@ -158,8 +189,11 @@ def budget_report(db: Session, window_months: int = WINDOW_MONTHS, as_of: date |
         expense_months=expense_months,
         income_months=income_months,
         net_months=[i - e for i, e in zip(income_months, expense_months, strict=True)],
-        expense_budget=sum(r.budget for r in roots if r.kind == EXPENSE),
-        income_budget=sum(r.budget for r in roots if r.kind == INCOME),
+        expense_budgets=totals(False, "budgets"),
+        income_budgets=totals(True, "budgets"),
+        expense_budget=sum(r.budget for r in roots if not r.is_income),
+        income_budget=sum(r.budget for r in roots if r.is_income),
+        type_totals=type_totals,
     )
 
 
@@ -171,9 +205,9 @@ def chart_payload(report: BudgetReport, month_index: int) -> dict:
 
     top = sorted(
         (
-            (r.name, r.months[month_index], r.budget)
+            (r.name, r.months[month_index], r.budgets[month_index])
             for r in report.rows
-            if r.depth == 1 and r.kind == EXPENSE and r.months[month_index] > 0
+            if r.depth == 1 and not r.is_income and r.months[month_index] > 0
         ),
         key=lambda t: t[1],
         reverse=True,

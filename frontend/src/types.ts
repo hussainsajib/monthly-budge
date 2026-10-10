@@ -1,5 +1,25 @@
-export type Kind = 'expense' | 'income'
+export type Kind = string
 export type AccountKind = 'bank' | 'credit' | 'cash'
+
+export interface CategoryType {
+  key: string
+  label: string
+  direction: 'in' | 'out'
+}
+
+export interface CategoryConfig {
+  types: CategoryType[]
+  levels: string[]
+}
+
+export interface AccountType {
+  key: string
+  label: string
+}
+
+export interface AccountConfig {
+  types: AccountType[]
+}
 
 export interface Category {
   id: number
@@ -119,8 +139,10 @@ export interface ReportRow {
   name: string
   depth: number
   kind: Kind
+  is_income: boolean
   has_children: boolean
   months: number[]
+  budgets: number[]
   budget: number
   total: number
   avg: number
@@ -134,9 +156,13 @@ export interface Report {
   /** 1-based position in ``months`` driving the category chart. */
   month: number
   net_months: number[]
+  expense_budgets: number[]
+  income_budgets: number[]
+  net_budgets: number[]
   expense_budget: number
   income_budget: number
   avg_expense: number
+  type_totals: Record<string, { months: number; budget: number }>
   rows: ReportRow[]
   chart: {
     spending: number[]
@@ -181,6 +207,7 @@ export interface BudgetLine {
   budget_cents: number
   is_override: boolean
   actual_cents: number
+  recurring_cents: number
   remaining_cents: number
 }
 
@@ -191,5 +218,6 @@ export interface BudgetMonth {
   income_actual: number
   expense_actual: number
   unassigned: number
+  type_totals: Record<string, { budget: number; actual: number }>
   lines: BudgetLine[]
 }

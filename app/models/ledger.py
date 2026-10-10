@@ -69,7 +69,6 @@ class Transaction(Base):
     category: Mapped[Category] = relationship(lazy="joined")
     account: Mapped[Account | None] = relationship(lazy="joined")
 
-    @property
-    def cash_delta_cents(self) -> int:
-        """Effect on the owning account's balance."""
-        return self.amount_cents if self.category.kind == INCOME else -self.amount_cents
+    def cash_delta_cents(self, is_income: bool) -> int:
+        """Effect on the owning account's balance; the caller resolves the category type's direction."""
+        return self.amount_cents if is_income else -self.amount_cents

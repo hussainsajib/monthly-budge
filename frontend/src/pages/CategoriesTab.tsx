@@ -3,12 +3,13 @@ import { Archive, ArchiveRestore, ChevronDown, ChevronRight, ChevronUp, Pencil, 
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type CategoryBody } from '../api'
+import { typeLabel } from '../categoryConfig'
 import { subtreeIds } from '../categoryTree'
 import { CategorySelect } from '../components/selects'
 import { Bar } from '../components/table'
 import { Modal } from '../components/ui'
 import { centsToInput, formatMoney } from '../money'
-import { useCategories } from '../queries'
+import { useCategories, useCategoryConfig } from '../queries'
 import { useRun } from '../toast'
 import type { Category } from '../types'
 
@@ -116,6 +117,7 @@ function DraftFields({
   budgetLocked: boolean
 }) {
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => onChange({ ...draft, [k]: v })
+  const types = useCategoryConfig().data?.types ?? []
   return (
     <>
       <div>
@@ -138,8 +140,11 @@ function DraftFields({
           disabled={draft.parent_id !== null}
           onChange={(e) => set('kind', e.target.value)}
         >
-          <option value="expense">Expense</option>
-          <option value="income">Income</option>
+          {types.map((t) => (
+            <option key={t.key} value={t.key}>
+              {t.label}
+            </option>
+          ))}
         </select>
       </div>
       <div className="field-full">
@@ -214,6 +219,7 @@ function defaultCollapsed(categories: Category[]): Set<number> {
 
 export default function CategoriesTab() {
   const query = useCategories()
+  const config = useCategoryConfig().data
   const run = useRun()
   const categories = query.data ?? []
 
@@ -384,7 +390,7 @@ export default function CategoriesTab() {
             {!c.is_active && <span className="chip">inactive</span>}
             {c.depth === 0 && (
               <span className="chip">
-                <span className={`kind-dot ${c.kind}`} /> {c.kind}
+                <span className={`kind-dot ${c.kind}`} /> {typeLabel(config, c.kind)}
               </span>
             )}
           </span>

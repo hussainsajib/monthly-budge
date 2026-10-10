@@ -6,15 +6,9 @@ import { api } from '../api'
 import { Bar, SortHeader } from '../components/table'
 import { Modal, ViewToggle, useViewMode } from '../components/ui'
 import { centsToInput, formatMoney } from '../money'
-import { useSortedAccounts } from '../queries'
+import { useSortedAccounts, useAccountConfig } from '../queries'
 import { useRun } from '../toast'
 import type { Account } from '../types'
-
-const KINDS = [
-  { value: 'bank', label: 'Bank' },
-  { value: 'credit', label: 'Credit card' },
-  { value: 'cash', label: 'Cash' },
-] as const
 
 interface Draft {
   name: string
@@ -38,10 +32,9 @@ const toBody = (d: Draft) => ({ ...d, opening_date: d.opening_date || null })
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
-const kindLabel = (kind: string) => KINDS.find((k) => k.value === kind)?.label ?? kind
-
 function DraftFields({ draft, onChange, idPrefix }: { draft: Draft; onChange: (d: Draft) => void; idPrefix: string }) {
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => onChange({ ...draft, [k]: v })
+  const types = useAccountConfig().data?.types ?? []
   return (
     <>
       <div>
@@ -59,9 +52,9 @@ function DraftFields({ draft, onChange, idPrefix }: { draft: Draft; onChange: (d
       <div>
         <label htmlFor={`${idPrefix}-kind`}>Type</label>
         <select id={`${idPrefix}-kind`} value={draft.kind} onChange={(e) => set('kind', e.target.value)}>
-          {KINDS.map((k) => (
-            <option key={k.value} value={k.value}>
-              {k.label}
+          {types.map((t) => (
+            <option key={t.key} value={t.key}>
+              {t.label}
             </option>
           ))}
         </select>
@@ -138,6 +131,7 @@ function AccountTile({
   onEdit: (a: Account) => void
   onToggle: (a: Account) => void
 }) {
+  const config = useAccountConfig().data
   return (
     <article className="tile">
       <div className="tile-head">
@@ -149,7 +143,7 @@ function AccountTile({
       </div>
       <div className="tile-value">{formatMoney(account.current_balance_cents)}</div>
       <div className="tile-meta">
-        {kindLabel(account.kind)} · opened {account.opening_date ?? '—'}
+        {config?.types.find((t) => t.key === account.kind)?.label ?? account.kind} · opened {account.opening_date ?? '—'}
       </div>
       <div className="tile-foot">
         {account.transaction_count ? (
@@ -208,6 +202,7 @@ function AccountsTilesSkeleton() {
 
 export default function AccountsTab() {
   const run = useRun()
+  const config = useAccountConfig().data
   const { view, change: setView } = useViewMode('accounts')
   const [sorting, setSorting] = useState<SortingState>([{ id: 'name', desc: false }])
   const [draft, setDraft] = useState<Draft>(EMPTY)
@@ -291,7 +286,7 @@ export default function AccountsTab() {
       header: ({ column }) => <SortHeader column={column} label="Type" />,
       cell: ({ row }) => (
         <span className="row-label">
-          <span className={`kind-dot ${row.original.kind}`} /> {kindLabel(row.original.kind)}
+          <span className={`kind-dot ${row.original.kind}`} /> {config?.types.find((t) => t.key === row.original.kind)?.label ?? row.original.kind}
         </span>
       ),
     },

@@ -1,4 +1,4 @@
-import { Repeat, Tags, Wallet } from 'lucide-react'
+import { Repeat, SlidersHorizontal, Tags, Wallet } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { Tooltip } from 'react-tooltip'
 
@@ -6,6 +6,7 @@ const TABS = [
   { to: 'categories', label: 'Categories', icon: Tags },
   { to: 'accounts', label: 'Accounts', icon: Wallet },
   { to: 'recurring', label: 'Recurring', icon: Repeat },
+  { to: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
 ]
 
 export default function SettingsLayout() {

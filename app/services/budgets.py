@@ -12,8 +12,10 @@ from datetime import date
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.models import EXPENSE, INCOME, MonthlyBudget, Transaction
+from app.models import MonthlyBudget, RecurringTemplate, Transaction
 from app.services.categories import CategoryError, Node, load_tree
+from app.services.category_config import income_keys
+from app.services.recurring import occurrences
 
 
 @dataclass
@@ -29,6 +31,7 @@ class BudgetLine:
     budget_cents: int  # this month's budget, rolled up for parents
     is_override: bool  # leaf only
     actual_cents: int  # rolled up for parents
+    recurring_cents: int = 0  # active recurring templates touching this category this month
 
     @property
     def remaining_cents(self) -> int:
@@ -43,6 +46,7 @@ class BudgetMonth:
     expense_budget: int
     income_actual: int
     expense_actual: int
+    type_totals: dict[str, dict[str, int]]  # type key -> {"budget": cents, "actual": cents}
 
     @property
     def unassigned_cents(self) -> int:
@@ -81,6 +85,26 @@ def _actuals(db: Session, month: date) -> dict[int, int]:
     return {category_id: int(total) for category_id, total in db.execute(stmt)}
 
 
+def _recurring(db: Session, month: date) -> dict[int, int]:
+    """Active recurring template amounts (per occurrence) falling in ``month``, by category.
+
+    Recurring items are budget commitments, not transactions — they never create ledger
+    rows (those only come from manual entry or bulk import). The schedule decides how many
+    of each template's amount lands in this month.
+    """
+    sums: dict[int, int] = {}
+    for tpl in db.scalars(select(RecurringTemplate).where(RecurringTemplate.is_active.is_(True))):
+        schedule = (
+            tpl.schedule
+            if tpl.schedule is not None
+            else {"freq": "monthly", "interval": 1, "start": "2000-01-01", "by_month_day": [tpl.day_of_month]}
+        )
+        n = len(occurrences(schedule, month.year, month.month))
+        if n:
+            sums[tpl.category_id] = sums.get(tpl.category_id, 0) + abs(tpl.amount_cents) * n
+    return sums
+
+
 def effective_budgets(db: Session, month: date) -> dict[int, int]:
     """Leaf category id -> budget for ``month`` (override if set, else the default)."""
     overrides = _overrides(db, month)
@@ -93,20 +117,23 @@ def build_month(db: Session, month: date) -> BudgetMonth:
     tree = load_tree(db)
     overrides = _overrides(db, month)
     actuals = _actuals(db, month)
+    recurring_amt = _recurring(db, month)
     lines: list[BudgetLine] = []
 
-    def visit(node: Node) -> tuple[int, int, int]:
+    def visit(node: Node) -> tuple[int, int, int, int]:
         """Pre-order emit with post-order totals: reserve the slot, fill after the children."""
         slot = len(lines)
         lines.append(None)  # type: ignore[arg-type]
         if node.children:
             totals = [visit(child) for child in node.children]
-            default, budget, actual = (sum(t[i] for t in totals) for i in range(3))
+            default, budget, actual, recurring = (sum(t[i] for t in totals) for i in range(4))
             actual += actuals.get(node.id, 0)  # a parent should not hold transactions, but never lose one
+            recurring += recurring_amt.get(node.id, 0)
         else:
             default = node.category.monthly_budget_cents
             budget = overrides.get(node.id, default)
             actual = actuals.get(node.id, 0)
+            recurring = recurring_amt.get(node.id, 0)
         cat = node.category
         if cat.is_active or budget or actual:
             lines[slot] = BudgetLine(
@@ -121,25 +148,37 @@ def build_month(db: Session, month: date) -> BudgetMonth:
                 budget,
                 node.id in overrides and not node.children,
                 actual,
+                recurring,
             )
         else:
             lines[slot] = None  # type: ignore[assignment]
-        return default, budget, actual
+        return default, budget, actual, recurring
 
     for root in tree.roots:
         visit(root)
     lines = [line for line in lines if line is not None]
 
-    def total(kind: str, attr: str) -> int:
-        return sum(getattr(line, attr) for line in lines if line.depth == 0 and line.kind == kind)
+    income = income_keys(db)
+
+    def total(flow_in: bool, attr: str) -> int:
+        return sum(getattr(line, attr) for line in lines if line.depth == 0 and (line.kind in income) == flow_in)
+
+    type_totals: dict[str, dict[str, int]] = {}
+    for line in lines:
+        if line.depth != 0:
+            continue
+        slot = type_totals.setdefault(line.kind, {"budget": 0, "actual": 0})
+        slot["budget"] += line.budget_cents
+        slot["actual"] += line.actual_cents
 
     return BudgetMonth(
         month,
         lines,
-        income_budget=total(INCOME, "budget_cents"),
-        expense_budget=total(EXPENSE, "budget_cents"),
-        income_actual=total(INCOME, "actual_cents"),
-        expense_actual=total(EXPENSE, "actual_cents"),
+        income_budget=total(True, "budget_cents"),
+        expense_budget=total(False, "budget_cents"),
+        income_actual=total(True, "actual_cents"),
+        expense_actual=total(False, "actual_cents"),
+        type_totals=type_totals,
     )
 
 
@@ -166,6 +205,24 @@ def set_budget(db: Session, month: date, category_id: int, cents: int | None) ->
     else:
         row.amount_cents = cents
     db.commit()
+
+
+def generate(db: Session, month: date, values: dict[int, int]) -> int:
+    """Snapshot a template (leaf category -> cents) into ``month``'s overrides; returns lines set.
+
+    Only values that differ from a category's default create an override, so the "customised"
+    marker stays meaningful. Any previous overrides for the month are replaced.
+    """
+    defaults = {n.id: n.category.monthly_budget_cents for n in load_tree(db).walk() if not n.children}
+    db.execute(delete(MonthlyBudget).where(MonthlyBudget.month == month))
+    rows = [
+        MonthlyBudget(month=month, category_id=cid, amount_cents=cents)
+        for cid, cents in values.items()
+        if cents != defaults.get(cid)
+    ]
+    db.add_all(rows)
+    db.commit()
+    return len(rows)
 
 
 def copy_previous(db: Session, month: date) -> int:

@@ -289,8 +289,17 @@ def test_recurring_sort(client, db, ids):
             client.delete(f"/api/recurring/{tpl_id}")
 
 
-def test_recurring_crud_and_generate(client, db, ids):
+def test_recurring_crud_and_budget(client, db, ids):
     cats, accs = ids
+
+    def rent_recurring(month: str) -> int:
+        return next(
+            line["recurring_cents"]
+            for line in client.get("/api/budget", params={"month": month}).json()["lines"]
+            if line["category_id"] == cats["Rent"]
+        )
+
+    base = rent_recurring("2026-02")
     body = {
         "description": "API rent",
         "category_id": cats["Rent"],
@@ -304,13 +313,12 @@ def test_recurring_crud_and_generate(client, db, ids):
         listed = next(t for t in client.get("/api/recurring").json() if t["id"] == tpl_id)
         assert (listed["amount_cents"], listed["category_path"]) == (100000, "Fixed Expenses › Rent")
 
-        assert client.post("/api/recurring/generate", json={"month": "2026-02"}).json()["created"] >= 1
-        assert client.post("/api/recurring/generate", json={"month": "2026-02"}).json()["created"] == 0  # idempotent
-        feb = client.get("/api/transactions", params={"q": "API rent"}).json()["items"]
-        assert [t["date"] for t in feb] == ["2026-02-28"]  # day 31 clamps to month length
-        assert client.post("/api/recurring/generate", json={"month": "nope"}).status_code == 400
+        assert rent_recurring("2026-02") == base + 100000  # recurring shows in its own columns
+        # Recurring items never create transactions — only manual entry or bulk import do.
+        assert client.get("/api/transactions", params={"q": "API rent"}).json()["items"] == []
 
         assert client.put(f"/api/recurring/{tpl_id}", json=body | {"is_active": False}).status_code == 200
+        assert rent_recurring("2026-02") == base  # archived templates stop contributing
     finally:
         client.delete(f"/api/recurring/{tpl_id}")
     assert db.get(RecurringTemplate, tpl_id) is None
@@ -323,8 +331,17 @@ CSV = (
 )
 
 
-def test_recurring_schedule_generation(client, ids):
+def test_recurring_schedule_budget(client, ids):
     cats, accs = ids
+
+    def grocery_recurring(month: str) -> int:
+        return next(
+            line["recurring_cents"]
+            for line in client.get("/api/budget", params={"month": month}).json()["lines"]
+            if line["category_id"] == cats["Grocery"]
+        )
+
+    base = grocery_recurring("2026-02")
     body = {
         "description": "Biweekly gas",
         "category_id": cats["Grocery"],
@@ -337,10 +354,8 @@ def test_recurring_schedule_generation(client, ids):
     try:
         listed = next(t for t in client.get("/api/recurring").json() if t["id"] == tpl_id)
         assert listed["schedule"] == body["schedule"]
-        assert client.post("/api/recurring/generate", json={"month": "2026-02"}).json()["created"] >= 2
-        feb = client.get("/api/transactions", params={"q": "Biweekly gas"}).json()["items"]
-        assert sorted(t["date"] for t in feb) == ["2026-02-02", "2026-02-16"]
-        assert client.post("/api/recurring/generate", json={"month": "2026-02"}).json()["created"] == 0  # idempotent
+        assert grocery_recurring("2026-02") == base + 2000  # biweekly -> 2 occurrences in Feb
+        assert client.get("/api/transactions", params={"q": "Biweekly gas"}).json()["items"] == []
         bad = client.post(
             "/api/recurring", json=body | {"schedule": {"freq": "monthly", "interval": 1, "start": "2026-01-01"}}
         )
@@ -388,11 +403,11 @@ def test_report_and_cashflow_shapes(client, ids):
     cats, accs = ids
     client.post("/api/transactions", json=_txn_body(cats, accs, date="2026-05-04"))
     report = client.get("/api/reports", params={"as_of": "2026-05-15"}).json()
-    assert report["months"] == ["2026-02", "2026-03", "2026-04", "2026-05"]  # rolling window
-    assert report["month"] == 4  # defaults to the last month with activity
+    assert report["months"] == ["2026-03", "2026-04", "2026-05"]  # rolling window
+    assert report["month"] == 3  # defaults to the last month with activity
     assert report["chart"]["categories"] == ["Dining Out / Takeout"]
     row = next(r for r in report["rows"] if r["category_id"] == cats["Dining Out / Takeout"])
-    assert row["months"] == [0, 0, 0, 3955]
+    assert row["months"] == [0, 0, 3955]
     assert client.get("/api/reports", params={"as_of": "2026-05-15", "month": 2}).json()["month"] == 2
 
     flow = client.get("/api/cashflow", params={"account_id": accs["Chequing"]}).json()
@@ -421,6 +436,52 @@ def test_thresholds_roundtrip(client, ids):
             "/api/settings/thresholds",
             json={"low": str(original[0] / 100), "warn": str(original[1] / 100)},
         )
+
+
+def test_account_config_endpoints(client, db):
+    cfg = client.get("/api/settings/account-config").json()
+    assert [t["key"] for t in cfg["types"]] == ["bank", "credit", "cash", "savings", "investment", "debt"]
+    assert cfg["types"] == [
+        {"key": "bank", "label": "Bank / Chequing"},
+        {"key": "credit", "label": "Credit card"},
+        {"key": "cash", "label": "Cash"},
+        {"key": "savings", "label": "Savings"},
+        {"key": "investment", "label": "Investment"},
+        {"key": "debt", "label": "Debt"},
+    ]
+    # validated against the configured set
+    made = client.post("/api/accounts", json={"name": "Savings Pot", "kind": "savings", "opening_balance": "10"})
+    assert made.status_code == 201
+    client.delete(f"/api/accounts/{made.json()['id']}")
+    assert client.post("/api/accounts", json={"name": "x", "kind": "gold"}).status_code == 400
+
+
+def test_category_config_endpoints(client, db):
+    cfg = client.get("/api/settings/category-config").json()
+    assert [t["key"] for t in cfg["types"]] == ["expense", "income", "savings", "debt", "investment"]
+    assert {t["direction"] for t in cfg["types"]} == {"in", "out"}
+    assert len(cfg["levels"]) == 4
+
+    try:
+        bad = client.put("/api/settings/category-config", json={"levels": ["Only", "Two"]})
+        assert bad.status_code == 400
+        res = client.put(
+            "/api/settings/category-config",
+            json={"levels": ["Group", "Category", "Item", "Detail"]},
+        )
+        assert res.status_code == 200 and res.json()["levels"][0] == "Group"
+        assert client.get("/api/settings/category-config").json()["levels"][0] == "Group"
+    finally:
+        client.put(
+            "/api/settings/category-config",
+            json={"levels": ["Section", "Category", "Sub-category", "Sub-sub-category"]},
+        )
+
+    # A valid custom type works; an unknown one is rejected.
+    made = client.post("/api/categories", json={"name": "Reserve", "kind": "savings"})
+    assert made.status_code == 201
+    client.delete(f"/api/categories/{made.json()['id']}")
+    assert client.post("/api/categories", json={"name": "Nope", "kind": "weird"}).status_code == 400
 
 
 @pytest.mark.skipif(not (DIST / "index.html").exists(), reason="front end not built")

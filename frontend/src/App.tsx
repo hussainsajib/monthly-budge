@@ -5,6 +5,7 @@ import CashflowPage from './pages/CashflowPage'
 import BudgetPage from './pages/BudgetPage'
 import CategoriesTab from './pages/CategoriesTab'
 import ImportPage from './pages/ImportPage'
+import PreferencesTab from './pages/PreferencesTab'
 import RecurringTab from './pages/RecurringTab'
 import SettingsLayout from './pages/SettingsLayout'
 import TransactionEditPage from './pages/TransactionEditPage'
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="categories" element={<CategoriesTab />} />
           <Route path="accounts" element={<AccountsTab />} />
           <Route path="recurring" element={<RecurringTab />} />
+          <Route path="preferences" element={<PreferencesTab />} />
         </Route>
         <Route path="*" element={<Navigate to="/transactions" replace />} />
       </Route>

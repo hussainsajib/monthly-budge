@@ -4,7 +4,9 @@ import pytest
 
 from app.models import Category, Transaction
 from app.services import categories as svc
+from app.services import category_config as cfg
 from app.services.categories import CategoryError
+from app.services.category_config import CategoryConfigError
 
 
 def _txn(db, category_id, cents=1000, when=date(2026, 5, 1), desc="x"):
@@ -124,3 +126,38 @@ def test_bulk_reassign(db, ids):
     assert a.category_id == cats["Rent"]
     with pytest.raises(CategoryError):  # top-level sections are not assignable
         svc.reassign_transactions(db, [a.id], cats["Essential Variable"])
+
+
+def test_category_config_types_and_levels(db):
+    try:
+        assert [t.key for t in cfg.get_types(db)] == ["expense", "income", "savings", "debt", "investment"]
+        assert cfg.income_keys(db) == {"income"}
+        assert cfg.is_income(db, "income") and not cfg.is_income(db, "savings")
+        assert cfg.get_levels(db) == ["Section", "Category", "Sub-category", "Sub-sub-category"]
+
+        cfg.set_levels(db, ["Group", "Category", "Item", "Detail"])
+        assert cfg.get_levels(db) == ["Group", "Category", "Item", "Detail"]
+        with pytest.raises(CategoryConfigError):
+            cfg.set_levels(db, ["Only", "Three"])
+        with pytest.raises(CategoryConfigError):
+            cfg.set_levels(db, ["a,b", "b", "c", "d"])
+    finally:
+        cfg.set_levels(db, list(cfg.DEFAULT_LEVELS))
+
+
+def test_custom_outflow_type_behaves_like_expense(db):
+    section = svc.create_category(db, "Savings Section", None, kind="savings")
+    leaf = svc.create_category(db, "Emergency", section.id)
+    try:
+        assert leaf.kind == "savings"
+        # A positive amount on an outflow type is money out (negative cash delta).
+        txn = Transaction(date=date(2026, 5, 1), description="x", category_id=leaf.id, amount_cents=5000)
+        assert txn.cash_delta_cents(leaf.kind in cfg.income_keys(db)) == -5000
+    finally:
+        svc.delete_category(db, leaf.id)
+        svc.delete_category(db, section.id)
+
+
+def test_unknown_type_rejected(db):
+    with pytest.raises(CategoryError):
+        svc.create_category(db, "Bad", None, kind="weird")

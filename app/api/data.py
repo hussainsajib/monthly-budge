@@ -15,14 +15,22 @@ from sqlalchemy.orm import Session
 
 from app.core.money import to_cents
 from app.db.session import get_db
-from app.models import INCOME, Account, Category, RecurringTemplate, Transaction
+from app.models import Account, Category, RecurringTemplate, Transaction
 from app.schemas.transaction import TransactionInput
 from app.services import budgets, importing, reports
 from app.services import categories as category_service
 from app.services import transactions as txn_service
+from app.services.account_config import account_type_keys, ensure_account_config, get_account_types
 from app.services.cashflow import build_ledger
 from app.services.categories import CategoryTree
-from app.services.recurring import generate_for_month, list_templates, validate_schedule
+from app.services.category_config import (
+    ensure_category_config,
+    get_levels,
+    get_types,
+    income_keys,
+    set_levels,
+)
+from app.services.recurring import list_templates, validate_schedule
 from app.services.reference import (
     LOW_BALANCE_KEY,
     WARN_BALANCE_KEY,
@@ -33,7 +41,6 @@ from app.services.reference import (
 router = APIRouter(prefix="/api")
 
 PAGE_SIZE = 100
-ACCOUNT_KINDS = ("bank", "credit", "cash")
 ACCOUNT_SORTS = (
     "name",
     "kind",
@@ -186,11 +193,12 @@ def _sort_accounts(rows: list[dict], sort: str, desc: bool) -> list[dict]:
 def _account_stats(db: Session) -> dict[int, dict]:
     """Per-account: balance change up to today, transaction count, and total transacted."""
     today = date.today()
+    income = income_keys(db)
     deltas = dict(
         db.execute(
             select(
                 Transaction.account_id,
-                func.sum(case((Category.kind == INCOME, Transaction.amount_cents), else_=-Transaction.amount_cents)),
+                func.sum(case((Category.kind.in_(income), Transaction.amount_cents), else_=-Transaction.amount_cents)),
             )
             .join(Category, Transaction.category_id == Category.id)
             .where(Transaction.account_id.is_not(None), Transaction.date <= today)
@@ -214,8 +222,8 @@ def _account_stats(db: Session) -> dict[int, dict]:
     return stats
 
 
-def _apply_account(acc: Account, body: AccountBody) -> None:
-    if body.kind not in ACCOUNT_KINDS or not body.name.strip():
+def _apply_account(db: Session, acc: Account, body: AccountBody) -> None:
+    if body.kind not in account_type_keys(db) or not body.name.strip():
         raise ValueError("Name and a valid type are required")
     acc.name, acc.kind = body.name.strip(), body.kind
     acc.opening_balance_cents = to_cents(body.opening_balance or "0")
@@ -225,7 +233,7 @@ def _apply_account(acc: Account, body: AccountBody) -> None:
 
 def _save_account(db: Session, acc: Account, body: AccountBody) -> dict:
     with user_errors():
-        _apply_account(acc, body)
+        _apply_account(db, acc, body)
         db.add(acc)
         try:
             db.commit()
@@ -411,10 +419,6 @@ class RecurringBody(BaseModel):
     is_active: bool = True
 
 
-class GenerateBody(BaseModel):
-    month: str | None = None  # "YYYY-MM"; defaults to the current month
-
-
 def _recurring_out(t: RecurringTemplate, tree: CategoryTree) -> dict:
     return {
         "id": t.id,
@@ -468,14 +472,6 @@ def get_recurring(sort: str = "description", dir: str = "asc", db: Session = Dep
     tree = category_service.load_tree(db)
     rows = [_recurring_out(t, tree) for t in list_templates(db)]
     return _sort_recurring(rows, sort, dir == "desc")
-
-
-@router.post("/recurring/generate")
-def generate_recurring(body: GenerateBody, db: Session = Depends(get_db)):
-    with user_errors():
-        year, month = (int(p) for p in (body.month or date.today().strftime("%Y-%m")).split("-"))
-        created = generate_for_month(db, year, month)
-    return {"created": created}
 
 
 @router.post("/recurring", status_code=201)
@@ -594,6 +590,7 @@ def get_budget(month: str | None = None, db: Session = Depends(get_db)):
         "income_actual": data.income_actual,
         "expense_actual": data.expense_actual,
         "unassigned": data.unassigned_cents,
+        "type_totals": data.type_totals,
         "lines": [
             {
                 "category_id": line.category_id,
@@ -607,6 +604,7 @@ def get_budget(month: str | None = None, db: Session = Depends(get_db)):
                 "budget_cents": line.budget_cents,
                 "is_override": line.is_override,
                 "actual_cents": line.actual_cents,
+                "recurring_cents": line.recurring_cents,
                 "remaining_cents": line.remaining_cents,
             }
             for line in data.lines
@@ -633,6 +631,17 @@ def copy_previous_budget(month: str, db: Session = Depends(get_db)):
     return {"changed": changed}
 
 
+class GenerateBudgetBody(BaseModel):
+    values: dict[int, int]  # leaf category_id -> budget cents
+
+
+@router.post("/budget/{month}/generate")
+def generate_budget(month: str, body: GenerateBudgetBody, db: Session = Depends(get_db)):
+    with user_errors():
+        budgets.generate(db, budgets.parse_month(month), body.values)
+    return {"ok": True}
+
+
 # ------------------------------------------------------------------- reports
 
 
@@ -652,17 +661,25 @@ def get_report(db: Session = Depends(get_db), month: int | None = None, as_of: d
         "months": report.months,
         "month": m + 1,
         "net_months": report.net_months,
+        "expense_budgets": report.expense_budgets,
+        "income_budgets": report.income_budgets,
+        "net_budgets": [
+            i - e for i, e in zip(report.income_budgets, report.expense_budgets, strict=True)
+        ],
         "expense_budget": report.expense_budget,
         "income_budget": report.income_budget,
         "avg_expense": report.avg_expense,
+        "type_totals": report.type_totals,
         "rows": [
             {
                 "category_id": r.category_id,
                 "name": r.name,
                 "depth": r.depth,
                 "kind": r.kind,
+                "is_income": r.is_income,
                 "has_children": r.has_children,
                 "months": r.months,
+                "budgets": r.budgets,
                 "budget": r.budget,
                 "total": r.total,
                 "avg": r.avg,
@@ -726,3 +743,29 @@ def set_thresholds(body: ThresholdsBody, db: Session = Depends(get_db)):
     set_int_setting(db, LOW_BALANCE_KEY, low)
     set_int_setting(db, WARN_BALANCE_KEY, warn)
     return {"low_balance_cents": low, "warn_balance_cents": warn}
+
+
+class CategoryConfigBody(BaseModel):
+    levels: list[str]
+
+
+@router.get("/settings/category-config")
+def get_category_config(db: Session = Depends(get_db)):
+    ensure_category_config(db)
+    return {
+        "types": [{"key": t.key, "label": t.label, "direction": t.direction} for t in get_types(db)],
+        "levels": get_levels(db),
+    }
+
+
+@router.put("/settings/category-config")
+def set_category_config(body: CategoryConfigBody, db: Session = Depends(get_db)):
+    with user_errors():
+        levels = set_levels(db, body.levels)
+    return {"levels": levels}
+
+
+@router.get("/settings/account-config")
+def get_account_config(db: Session = Depends(get_db)):
+    ensure_account_config(db)
+    return {"types": [{"key": t.key, "label": t.label} for t in get_account_types(db)]}

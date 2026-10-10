@@ -1,7 +1,9 @@
 import type {
   Account,
+  AccountConfig,
   Cashflow,
   Category,
+  CategoryConfig,
   BudgetMonth,
   ImportPreviewRow,
   Recurring,
@@ -97,7 +99,6 @@ export const api = {
   createRecurring: (b: RecurringBody) => post<{ id: number }>('/recurring', b),
   updateRecurring: (id: number, b: RecurringBody) => put<{ id: number }>(`/recurring/${id}`, b),
   deleteRecurring: (id: number) => del(`/recurring/${id}`),
-  generateRecurring: (month: string) => post<{ created: number }>('/recurring/generate', { month }),
 
   importPreview: (form: FormData) => post<ImportPreviewRow[]>('/import/preview', form),
   importCommit: (accountId: number | null, rows: Omit<ImportPreviewRow, 'duplicate'>[]) =>
@@ -107,9 +108,14 @@ export const api = {
   setBudget: (month: string, categoryId: number, amount: string | null) =>
     put<{ ok: boolean }>(`/budget/${month}/${categoryId}`, { amount }),
   copyPreviousBudget: (month: string) => post<{ changed: number }>(`/budget/${month}/copy-previous`),
+  generateBudget: (month: string, values: Record<number, number>) =>
+    post<{ ok: boolean }>(`/budget/${month}/generate`, { values }),
 
   report: (month: number | null) => get<Report>(`/reports${qs({ month })}`),
   cashflow: (accountId: number | null) => get<Cashflow>(`/cashflow${qs({ account_id: accountId })}`),
   setThresholds: (low: string, warn: string) =>
     put<{ low_balance_cents: number; warn_balance_cents: number }>('/settings/thresholds', { low, warn }),
+  categoryConfig: () => get<CategoryConfig>('/settings/category-config'),
+  setLevels: (levels: string[]) => put<{ levels: string[] }>('/settings/category-config', { levels }),
+  accountConfig: () => get<AccountConfig>('/settings/account-config'),
 }

@@ -9,7 +9,6 @@ import {
 } from '@tanstack/react-table'
 import {
   ArrowRight,
-  CalendarPlus,
   ChevronLeft,
   ChevronRight,
   ListFilter,
@@ -21,11 +20,12 @@ import ReactPaginateImport from 'react-paginate'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Tooltip } from 'react-tooltip'
 import { api } from '../api'
+import { isIncomeKind } from '../categoryConfig'
 import { AccountSelect, CategoryFilter, CategorySelect } from '../components/selects'
 import { Bar, SortHeader } from '../components/table'
 import TxnForm, { type TxnFormValues } from '../components/TxnForm'
 import { formatMoney, todayIso } from '../money'
-import { useAccounts, useCategories } from '../queries'
+import { useAccounts, useCategories, useCategoryConfig } from '../queries'
 import { useRun, useToast } from '../toast'
 import type { Txn } from '../types'
 
@@ -81,13 +81,13 @@ export default function TransactionsPage() {
   const run = useRun()
   const { fail } = useToast()
   const categories = useCategories()
+  const config = useCategoryConfig().data
   const accounts = useAccounts()
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [moveTo, setMoveTo] = useState<number | null>(null)
   const descriptions = useQuery({ queryKey: ['transactions', 'descriptions'], queryFn: api.descriptions })
   const [initial, setInitial] = useState<TxnFormValues>(() => blankForm(todayIso()))
   const [formKey, setFormKey] = useState(0)
-  const [month, setMonth] = useState(() => todayIso().slice(0, 7))
   const [sorting, setSorting] = useState<SortingState>([{ id: 'date', desc: true }])
 
   const reset = (values: TxnFormValues) => {
@@ -211,7 +211,7 @@ export default function TransactionsPage() {
       accessorKey: 'amount_cents',
       header: ({ column }) => <SortHeader column={column} label="Amount" />,
       cell: ({ row }) => (
-        <span className={row.original.kind === 'income' ? 'under' : ''}>{formatMoney(row.original.amount_cents)}</span>
+        <span className={isIncomeKind(config, row.original.kind) ? 'under' : ''}>{formatMoney(row.original.amount_cents)}</span>
       ),
     },
     {
@@ -275,23 +275,6 @@ export default function TransactionsPage() {
           if (created) reset(blankForm(v.date)) // keep the date: entries usually come in batches
         }}
       />
-
-      <form
-        className="row"
-        style={{ marginBottom: 16 }}
-        onSubmit={(e) => {
-          e.preventDefault()
-          void run(() => api.generateRecurring(month), (r) => `Created ${r.created} recurring transaction(s)`)
-        }}
-      >
-        <div>
-          <label htmlFor="gen-month">Month</label>
-          <input id="gen-month" type="month" value={month} onChange={(e) => setMonth(e.target.value)} required />
-        </div>
-        <button className="secondary shrink with-icon" type="submit">
-          <CalendarPlus size={16} /> Add this month's recurring items
-        </button>
-      </form>
 
       <form
         className="card"

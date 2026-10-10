@@ -1,4 +1,4 @@
-"""Recurring templates -> concrete transactions for a month.
+"""Recurring templates: recurrence schedules that feed the budget as commitments.
 
 A template has a JSON ``schedule`` in a calendar-style (RRULE-like) format; ``None``
 means the legacy "monthly on ``day_of_month``". Shape:
@@ -10,6 +10,9 @@ means the legacy "monthly on ``day_of_month``". Shape:
 - ``weekly``: ``by_weekday`` = [0..6] (Mon..Sun); default [start's weekday]
 - ``monthly``: ``by_month_day`` = [1..31, -1=last]  OR  ``by_nth_weekday`` = {week, weekday}
 - ``yearly``: ``month`` = 1..12 plus ``day`` (1..31, -1=last) OR ``by_nth_weekday``
+
+Recurring items are commitments, not transactions: they never create ledger rows, so they
+only enter the numbers as part of a category's budget.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import RecurringTemplate, Transaction
+from app.models import RecurringTemplate
 
 FREQS = ("daily", "weekly", "monthly", "yearly")
 
@@ -192,37 +195,3 @@ def occurrences(schedule: dict, year: int, month: int) -> list[date]:
 def list_templates(db: Session) -> list[RecurringTemplate]:
     stmt = select(RecurringTemplate).order_by(RecurringTemplate.day_of_month, RecurringTemplate.id)
     return list(db.scalars(stmt).unique())
-
-
-def generate_for_month(db: Session, year: int, month: int) -> int:
-    """Create missing transactions for active templates. Idempotent; returns number created."""
-    last_day = calendar.monthrange(year, month)[1]
-    first, last = date(year, month, 1), date(year, month, last_day)
-    existing = {
-        (t.description.lower(), t.category_id)
-        for t in db.scalars(select(Transaction).where(Transaction.date >= first, Transaction.date <= last)).unique()
-    }
-    created = 0
-    for tpl in list_templates(db):
-        if not tpl.is_active or (tpl.description.lower(), tpl.category_id) in existing:
-            continue
-        schedule = tpl.schedule if tpl.schedule is not None else {
-            "freq": "monthly",
-            "interval": 1,
-            "start": "2000-01-01",
-            "by_month_day": [tpl.day_of_month],
-        }
-        for when in occurrences(schedule, year, month):
-            db.add(
-                Transaction(
-                    date=when,
-                    description=tpl.description,
-                    category_id=tpl.category_id,
-                    account_id=tpl.account_id,
-                    amount_cents=tpl.amount_cents,
-                    notes="Recurring",
-                )
-            )
-            created += 1
-    db.commit()
-    return created
