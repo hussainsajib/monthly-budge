@@ -151,7 +151,7 @@ export default function ImportPage() {
                 onChange={(e) => setFilter('text', e.target.value)}
               />
             </div>
-            <div>
+            <div className="field-cat">
               <CategoryFilter
                 id="if-category"
                 categories={categories.data ?? []}

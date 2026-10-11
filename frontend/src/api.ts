@@ -90,8 +90,6 @@ export const api = {
   createTransaction: (b: TxnBody) => post<Txn>('/transactions', b),
   updateTransaction: (id: number, b: TxnBody) => put<Txn>(`/transactions/${id}`, b),
   deleteTransaction: (id: number) => del(`/transactions/${id}`),
-  bulkCategory: (ids: number[], categoryId: number) =>
-    post<{ moved: number }>('/transactions/bulk-category', { ids, category_id: categoryId }),
   suggest: (q: string) => get<Suggestion | null>(`/suggest${qs({ q })}`),
 
   recurring: (params: Record<string, string | number | null | undefined> = {}) =>

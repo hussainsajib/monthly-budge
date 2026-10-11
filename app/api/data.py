@@ -288,11 +288,6 @@ class TransactionBody(BaseModel):
     notes: str | None = None
 
 
-class BulkCategoryBody(BaseModel):
-    ids: list[int]
-    category_id: int
-
-
 def _txn_input(body: TransactionBody) -> TransactionInput:
     return TransactionInput(
         date=body.date,
@@ -369,15 +364,6 @@ def recent_transactions(db: Session = Depends(get_db)):
 @router.get("/transactions/descriptions")
 def descriptions(db: Session = Depends(get_db)):
     return txn_service.recent_descriptions(db)
-
-
-@router.post("/transactions/bulk-category")
-def bulk_category(body: BulkCategoryBody, db: Session = Depends(get_db)):
-    if not body.ids:
-        raise HTTPException(400, "Select at least one transaction")
-    with user_errors():
-        count = category_service.reassign_transactions(db, body.ids, body.category_id)
-    return {"moved": count}
 
 
 @router.post("/transactions", status_code=201)

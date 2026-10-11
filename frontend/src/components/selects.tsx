@@ -106,6 +106,8 @@ interface CategorySelectProps {
   id?: string
   /** Set false in dense contexts (table cells) where the column headers would be noise. */
   showLabels?: boolean
+  /** Render one cascading select per configured level instead of the two-column (section + all-descendants) pair. */
+  cascade?: boolean
 }
 
 export function CategorySelect({
@@ -117,11 +119,29 @@ export function CategorySelect({
   exclude,
   id,
   showLabels = true,
+  cascade = false,
+  required = false,
 }: CategorySelectProps) {
   const parentMode = mode === 'parent'
   const levels = levelsOf(useCategoryConfig().data)
-  const sections = categories.filter((c) => c.depth === 0)
+  const byId = new Map(categories.map((c) => [c.id, c]))
+  const chainOf = (raw: number | null): (number | null)[] => {
+    const chain = levels.map(() => null as number | null)
+    if (raw == null) return chain
+    let cur: Category | undefined = byId.get(raw)
+    while (cur && cur.depth < chain.length) {
+      chain[cur.depth] = cur.id
+      cur = cur.parent_id != null ? byId.get(cur.parent_id) : undefined
+    }
+    return chain
+  }
+  const [chain, setChain] = useState<(number | null)[]>(() => chainOf(value))
   const [sectionId, setSectionId] = useState<number | null>(() => rootOf(categories, value))
+  const sections = categories.filter((c) => c.depth === 0)
+
+  useEffect(() => {
+    setChain(chainOf(value))
+  }, [categories, value])
 
   // Keep the category dropdown in sync when the value is set from outside (edit, autofill).
   // A null value means "nothing chosen yet", so it must not reset a section the user picked.
@@ -159,39 +179,88 @@ export function CategorySelect({
   const subDisabled = sectionId == null || subOptions.length === 0
   const subPlaceholder = sectionId == null ? (parentMode ? blank : 'Pick a category first') : blank
 
+  const optionsForCascade = (level: number): Option[] => {
+    const parentId = level === 0 ? null : chain[level - 1]
+    if (level > 0 && parentId == null) return []
+    return categories
+      .filter((c) => c.depth === level && (level === 0 ? c.parent_id == null : c.parent_id === parentId))
+      .filter((c) => c.is_active || c.id === chain[level])
+      .filter((c) => !exclude?.has(c.id))
+      .map((c) => ({ value: String(c.id), label: c.is_active ? c.name : `${c.name} (inactive)` }))
+  }
+
+  const onCascadeChange = (level: number, opt: Option | null) => {
+    const next = chain.slice()
+    next[level] = opt ? Number(opt.value) : null
+    for (let i = level + 1; i < next.length; i++) next[i] = null
+    setChain(next)
+    let deepest: number | null = null
+    for (const v of next) if (v != null) deepest = v
+    onChange(deepest)
+  }
+
   return (
-    <span className="cat-pair">
-      <PairCol htmlFor={id} label={showLabels ? levels[0] : undefined}>
-        <Select
-          inputId={id}
-          classNamePrefix="rs"
-          menuPosition="fixed"
-          menuPortalTarget={document.body}
-          styles={selectStyles}
-          isSearchable
-          options={sectionOptions}
-          value={sectionOptions.find((o) => o.value === String(sectionId)) ?? null}
-          placeholder={parentMode ? blank : 'Choose…'}
-          aria-label="Category"
-          onChange={onSectionChange}
-        />
-      </PairCol>
-      <PairCol htmlFor={id ? `${id}-sub` : undefined} label={showLabels ? levels[1] : undefined}>
-        <Select
-          inputId={id ? `${id}-sub` : undefined}
-          classNamePrefix="rs"
-          menuPosition="fixed"
-          menuPortalTarget={document.body}
-          styles={selectStyles}
-          isSearchable
-          options={subOptions}
-          value={subOptions.find((o) => o.value === String(value)) ?? null}
-          isDisabled={subDisabled}
-          placeholder={subPlaceholder}
-          aria-label="Sub-category"
-          onChange={(opt) => onChange(opt ? Number(opt.value) : null)}
-        />
-      </PairCol>
+    <span className="cat-pair" role="group" aria-required={required}>
+      {cascade && !parentMode ? (
+        levels.map((label, level) => {
+          const opts = optionsForCascade(level)
+          const disabled = level > 0 && (chain[level - 1] == null || opts.length === 0)
+          const selected = opts.find((o) => o.value === String(chain[level])) ?? null
+          return (
+            <PairCol key={level} htmlFor={level === 0 ? id : id ? `${id}-l${level}` : undefined} label={label}>
+              <Select
+                inputId={level === 0 ? id : id ? `${id}-l${level}` : undefined}
+                classNamePrefix="rs"
+                menuPosition="fixed"
+                menuPortalTarget={document.body}
+                styles={selectStyles}
+                isSearchable
+                isClearable
+                options={opts}
+                value={selected}
+                isDisabled={disabled}
+                placeholder="Choose…"
+                aria-label={label}
+                onChange={(opt) => onCascadeChange(level, opt)}
+              />
+            </PairCol>
+          )
+        })
+      ) : (
+        <>
+          <PairCol htmlFor={id} label={showLabels ? levels[0] : undefined}>
+            <Select
+              inputId={id}
+              classNamePrefix="rs"
+              menuPosition="fixed"
+              menuPortalTarget={document.body}
+              styles={selectStyles}
+              isSearchable
+              options={sectionOptions}
+              value={sectionOptions.find((o) => o.value === String(sectionId)) ?? null}
+              placeholder={parentMode ? blank : 'Choose…'}
+              aria-label="Category"
+              onChange={onSectionChange}
+            />
+          </PairCol>
+          <PairCol htmlFor={id ? `${id}-sub` : undefined} label={showLabels ? levels[1] : undefined}>
+            <Select
+              inputId={id ? `${id}-sub` : undefined}
+              classNamePrefix="rs"
+              menuPosition="fixed"
+              menuPortalTarget={document.body}
+              styles={selectStyles}
+              isSearchable
+              options={subOptions}
+              value={subOptions.find((o) => o.value === String(value)) ?? null}
+              isDisabled={subDisabled}
+              placeholder={subPlaceholder}
+              aria-label="Sub-category"
+              onChange={(opt) => onChange(opt ? Number(opt.value) : null)}
+            />
+          </PairCol>
+        </>
+      )}
     </span>
   )
 }
@@ -203,82 +272,98 @@ interface CategoryFilterProps {
   onChange: (v: string) => void
   unassigned?: boolean
   id?: string
+  /** Restrict the rendered levels to an inclusive [levelFrom, levelTo] slice of the configured levels. */
+  levelFrom?: number
+  levelTo?: number
 }
 
-/** Two cascading selects for the Transactions / Import filters (a whole category matches its sub-categories). */
-export function CategoryFilter({ categories, value, onChange, unassigned = false, id }: CategoryFilterProps) {
+/** One cascading select per configured level (a whole category matches its sub-categories). */
+export function CategoryFilter({
+  categories,
+  value,
+  onChange,
+  unassigned = false,
+  id,
+  levelFrom = 0,
+  levelTo,
+}: CategoryFilterProps) {
   const levels = levelsOf(useCategoryConfig().data)
-  const sections = categories.filter((c) => c.depth === 0)
-  const [sectionId, setSectionId] = useState<number | null>(() =>
-    rootOf(categories, value && value !== 'none' ? Number(value) : null),
-  )
+  const lastLevel = levelTo ?? levels.length - 1
+  const byId = new Map(categories.map((c) => [c.id, c]))
 
-  useEffect(() => {
-    setSectionId(rootOf(categories, value && value !== 'none' ? Number(value) : null))
-  }, [categories, value])
-
-  const section = sectionId != null ? categories.find((c) => c.id === sectionId) : undefined
-
-  const sectionOptions: Option[] = sections
-    .filter((c) => c.is_active || c.id === sectionId)
-    .map((c) => ({ value: String(c.id), label: labelOf(c) }))
-  if (unassigned) sectionOptions.unshift({ value: 'none', label: 'Unassigned' })
-
-  const subOptions: Option[] = section
-    ? [
-        { value: String(section.id), label: `— whole ${section.name} —` },
-        ...categories
-          .filter((c) => c.is_active && isUnder(categories, c, section.id))
-          .map((c) => ({ value: String(c.id), label: labelOf(c, section) })),
-      ]
-    : []
-
-  const onSectionChange = (opt: Option | null) => {
-    if (!opt || opt.value === 'none') {
-      setSectionId(null)
-      onChange(opt?.value ?? '')
-      return
+  const chainOf = (raw: string): (number | null)[] => {
+    const chain = levels.map(() => null as number | null)
+    if (!raw || raw === 'none') return chain
+    let cur: Category | undefined = byId.get(Number(raw))
+    while (cur) {
+      if (cur.depth < chain.length) chain[cur.depth] = cur.id
+      cur = cur.parent_id != null ? byId.get(cur.parent_id) : undefined
     }
-    setSectionId(Number(opt.value))
-    onChange(opt.value) // filtering by a whole category includes its sub-categories
+    return chain
   }
 
-  const firstValue = unassigned && value === 'none' ? sectionOptions[0] : (sectionOptions.find((o) => o.value === String(sectionId)) ?? null)
+  const [chain, setChain] = useState<(number | null)[]>(() => chainOf(value))
+
+  useEffect(() => {
+    setChain(chainOf(value))
+  }, [categories, value])
+
+  const optionsFor = (level: number): Option[] => {
+    const parentId = level === 0 ? null : chain[level - 1]
+    if (level > 0 && parentId == null) return []
+    const opts = categories
+      .filter((c) => c.depth === level && (level === 0 ? c.parent_id == null : c.parent_id === parentId))
+      .filter((c) => c.is_active || c.id === chain[level])
+      .map((c) => ({ value: String(c.id), label: c.is_active ? c.name : `${c.name} (inactive)` }))
+    if (level === 0 && unassigned) opts.unshift({ value: 'none', label: 'Unassigned' })
+    return opts
+  }
+
+  const onLevelChange = (level: number, opt: Option | null) => {
+    if (level === 0 && opt?.value === 'none') {
+      setChain(levels.map(() => null))
+      onChange('none')
+      return
+    }
+    const next = chain.slice()
+    next[level] = opt ? Number(opt.value) : null
+    for (let i = level + 1; i < next.length; i++) next[i] = null
+    setChain(next)
+    let deepest: number | null = null
+    for (const v of next) if (v != null) deepest = v
+    onChange(deepest == null ? '' : String(deepest))
+  }
 
   return (
     <span className="cat-pair">
-      <PairCol htmlFor={id} label={levels[0]}>
-        <Select
-          inputId={id}
-          classNamePrefix="rs"
-          menuPosition="fixed"
-          menuPortalTarget={document.body}
-          styles={selectStyles}
-          isSearchable
-          isClearable
-          options={sectionOptions}
-          value={firstValue}
-          placeholder="All categories"
-          aria-label="Category"
-          onChange={onSectionChange}
-        />
-      </PairCol>
-      <PairCol htmlFor={id ? `${id}-sub` : undefined} label={levels[1]}>
-        <Select
-          inputId={id ? `${id}-sub` : undefined}
-          classNamePrefix="rs"
-          menuPosition="fixed"
-          menuPortalTarget={document.body}
-          styles={selectStyles}
-          isSearchable
-          options={subOptions}
-          value={subOptions.find((o) => o.value === value) ?? null}
-          isDisabled={sectionId == null || subOptions.length === 0}
-          placeholder="— whole category —"
-          aria-label="Sub-category"
-          onChange={(opt) => onChange(opt ? opt.value : String(sectionId))}
-        />
-      </PairCol>
+      {levels.map((label, level) => {
+        if (level < levelFrom || level > lastLevel) return null
+        const opts = optionsFor(level)
+        const disabled = level > 0 && (chain[level - 1] == null || opts.length === 0)
+        const selected =
+          level === 0 && unassigned && value === 'none'
+            ? opts[0]
+            : (opts.find((o) => o.value === String(chain[level])) ?? null)
+        return (
+          <PairCol key={level} htmlFor={level === 0 ? id : id ? `${id}-l${level}` : undefined} label={label}>
+            <Select
+              inputId={level === 0 ? id : id ? `${id}-l${level}` : undefined}
+              classNamePrefix="rs"
+              menuPosition="fixed"
+              menuPortalTarget={document.body}
+              styles={selectStyles}
+              isSearchable
+              isClearable
+              options={opts}
+              value={selected}
+              isDisabled={disabled}
+              placeholder={`Any ${label.toLowerCase()}`}
+              aria-label={label}
+              onChange={(opt) => onLevelChange(level, opt)}
+            />
+          </PairCol>
+        )
+      })}
     </span>
   )
 }

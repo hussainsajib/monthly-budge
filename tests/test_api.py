@@ -173,17 +173,6 @@ def test_transactions_can_be_sorted(client, ids):
     assert len(by_cat) == 2
 
 
-def test_bulk_category(client, ids):
-    cats, accs = ids
-    ids_ = [client.post("/api/transactions", json=_txn_body(cats, accs)).json()["id"] for _ in range(2)]
-    res = client.post("/api/transactions/bulk-category", json={"ids": ids_, "category_id": cats["Grocery"]})
-    assert res.json() == {"moved": 2}
-    url = "/api/transactions/bulk-category"
-    assert client.post(url, json={"ids": [], "category_id": cats["Grocery"]}).status_code == 400
-    section_id = next(r["id"] for r in client.get("/api/categories").json() if r["depth"] == 0)
-    assert client.post(url, json={"ids": ids_, "category_id": section_id}).status_code == 400
-
-
 def test_account_create_update_and_duplicate(client, db):
     body = {"name": "API Test Account", "kind": "bank", "opening_balance": "100.00", "opening_date": "2026-01-01"}
     res = client.post("/api/accounts", json=body)

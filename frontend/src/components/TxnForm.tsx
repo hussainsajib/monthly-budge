@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { api } from '../api'
 import { useAccounts, useCategories } from '../queries'
 import { AccountSelect, CategorySelect } from './selects'
@@ -19,14 +19,34 @@ interface Props {
   /** Known descriptions for the datalist; also enables autofill of category/account/amount. */
   descriptions?: string[]
   big?: boolean
+  plain?: boolean
+  stacked?: boolean
+  autoFocus?: boolean
+  cascade?: boolean
+  submitDisabled?: boolean
+  onDirtyChange?: (dirty: boolean) => void
   extra?: ReactNode
 }
 
-export default function TxnForm({ initial, submitLabel, onSubmit, descriptions, big, extra }: Props) {
+export default function TxnForm({ initial, submitLabel, onSubmit, descriptions, big, plain, stacked, autoFocus, cascade, submitDisabled, onDirtyChange, extra }: Props) {
   const categories = useCategories()
   const accounts = useAccounts()
   const [v, setV] = useState<TxnFormValues>(initial)
   const [busy, setBusy] = useState(false)
+  const dirty = (Object.keys(initial) as (keyof TxnFormValues)[]).some((k) => v[k] !== initial[k])
+  const canSubmit = v.category_id !== null && !busy && !(submitDisabled ?? false)
+  const hint = busy
+    ? null
+    : v.category_id === null
+      ? 'Choose a category before saving.'
+      : submitDisabled
+        ? 'Nothing has changed yet.'
+        : null
+
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+
   const set = <K extends keyof TxnFormValues>(key: K, value: TxnFormValues[K]) => setV((p) => ({ ...p, [key]: value }))
 
   async function autofill(text: string) {
@@ -48,7 +68,7 @@ export default function TxnForm({ initial, submitLabel, onSubmit, descriptions, 
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    if (v.category_id === null || busy) return
+    if (v.category_id === null || busy || submitDisabled) return
     setBusy(true)
     try {
       await onSubmit({ ...v, category_id: v.category_id })
@@ -57,65 +77,153 @@ export default function TxnForm({ initial, submitLabel, onSubmit, descriptions, 
     }
   }
 
+  function onFormKeyDown(e: KeyboardEvent<HTMLFormElement>) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault()
+      if (canSubmit) void submit(e as unknown as FormEvent)
+    }
+  }
+
   return (
-    <form className={`card${big ? ' big-form' : ''}`} onSubmit={submit}>
-      <div className="grid txn-grid">
-        <div>
-          <label htmlFor="f-desc">Description</label>
-          <input
-            id="f-desc"
-            type="text"
-            list={descriptions ? 'known-descriptions' : undefined}
-            autoComplete="off"
-            required
-            value={v.description}
-            onChange={(e) => {
-              set('description', e.target.value)
-              if (descriptions?.some((d) => d.toLowerCase() === e.target.value.trim().toLowerCase()))
-                void autofill(e.target.value)
-            }}
-            onBlur={(e) => void autofill(e.target.value)}
-          />
+    <form
+      className={`${plain ? '' : 'card '}${big ? 'big-form' : ''}`.trim()}
+      onSubmit={submit}
+      onKeyDown={onFormKeyDown}
+    >
+      {stacked ? (
+        <>
+          <section className="form-section">
+            <div className="form-grid">
+              <div className="field-full">
+                <label htmlFor="f-desc">Description</label>
+                <input
+                  id="f-desc"
+                  type="text"
+                  list={descriptions ? 'known-descriptions' : undefined}
+                  autoComplete="off"
+                  autoFocus={autoFocus}
+                  required
+                  value={v.description}
+                  onChange={(e) => {
+                    set('description', e.target.value)
+                    if (descriptions?.some((d) => d.toLowerCase() === e.target.value.trim().toLowerCase()))
+                      void autofill(e.target.value)
+                  }}
+                  onBlur={(e) => void autofill(e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="f-amount">Amount (CAD)</label>
+                <input
+                  id="f-amount"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  required
+                  value={v.amount}
+                  onChange={(e) => set('amount', e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="f-date">Date</label>
+                <input id="f-date" type="date" required value={v.date} onChange={(e) => set('date', e.target.value)} />
+              </div>
+            </div>
+          </section>
+          <section className="form-section">
+            <h2>Category &amp; account</h2>
+            <div className="form-grid">
+              <div className="field-full category-cascade">
+                <CategorySelect
+                  id="f-category"
+                  categories={categories.data ?? []}
+                  value={v.category_id}
+                  onChange={(id) => set('category_id', id)}
+                  cascade={cascade}
+                  required
+                />
+              </div>
+              <div className="field-full">
+                <label htmlFor="f-account">Account</label>
+                <AccountSelect
+                  id="f-account"
+                  accounts={accounts.data ?? []}
+                  value={v.account_id}
+                  onChange={(id) => set('account_id', id)}
+                />
+              </div>
+            </div>
+          </section>
+          <section className="form-section">
+            <h2>Notes</h2>
+            <div className="form-grid">
+              <div className="field-full">
+                <label htmlFor="f-notes">Notes</label>
+                <textarea id="f-notes" rows={3} value={v.notes} onChange={(e) => set('notes', e.target.value)} />
+              </div>
+            </div>
+          </section>
+        </>
+      ) : (
+        <div className="grid txn-grid">
+          <div>
+            <label htmlFor="f-desc">Description</label>
+            <input
+              id="f-desc"
+              type="text"
+              list={descriptions ? 'known-descriptions' : undefined}
+              autoComplete="off"
+              required
+              value={v.description}
+              onChange={(e) => {
+                set('description', e.target.value)
+                if (descriptions?.some((d) => d.toLowerCase() === e.target.value.trim().toLowerCase()))
+                  void autofill(e.target.value)
+              }}
+              onBlur={(e) => void autofill(e.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="f-amount">Amount (CAD)</label>
+            <input
+              id="f-amount"
+              type="text"
+              inputMode="decimal"
+              placeholder="0.00"
+              required
+              value={v.amount}
+              onChange={(e) => set('amount', e.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="f-date">Date</label>
+            <input id="f-date" type="date" required value={v.date} onChange={(e) => set('date', e.target.value)} />
+          </div>
+          <div>
+            <CategorySelect
+              id="f-category"
+              categories={categories.data ?? []}
+              value={v.category_id}
+              onChange={(id) => set('category_id', id)}
+              cascade={cascade}
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="f-account">Account</label>
+            <AccountSelect
+              id="f-account"
+              accounts={accounts.data ?? []}
+              value={v.account_id}
+              onChange={(id) => set('account_id', id)}
+            />
+          </div>
+          <div>
+            <label htmlFor="f-notes">Notes</label>
+            <input id="f-notes" type="text" value={v.notes} onChange={(e) => set('notes', e.target.value)} />
+          </div>
         </div>
-        <div>
-          <label htmlFor="f-amount">Amount (CAD)</label>
-          <input
-            id="f-amount"
-            type="text"
-            inputMode="decimal"
-            placeholder="0.00"
-            required
-            value={v.amount}
-            onChange={(e) => set('amount', e.target.value)}
-          />
-        </div>
-        <div>
-          <label htmlFor="f-date">Date</label>
-          <input id="f-date" type="date" required value={v.date} onChange={(e) => set('date', e.target.value)} />
-        </div>
-        <div>
-          <CategorySelect
-            id="f-category"
-            categories={categories.data ?? []}
-            value={v.category_id}
-            onChange={(id) => set('category_id', id)}
-            required
-          />
-        </div>
-        <div>
-          <label htmlFor="f-account">Account</label>
-          <AccountSelect
-            id="f-account"
-            accounts={accounts.data ?? []}
-            value={v.account_id}
-            onChange={(id) => set('account_id', id)}
-          />
-        </div>
-        <div>
-          <label htmlFor="f-notes">Notes</label>
-          <input id="f-notes" type="text" value={v.notes} onChange={(e) => set('notes', e.target.value)} />
-        </div>
-      </div>
+      )}
       {descriptions && (
         <datalist id="known-descriptions">
           {descriptions.map((d) => (
@@ -129,12 +237,13 @@ export default function TxnForm({ initial, submitLabel, onSubmit, descriptions, 
           <code>61.09+1.37</code> work. Refunds: enter a negative amount.
         </p>
       )}
-      <div className="row">
-        <button type="submit" disabled={busy}>
+      <div className="row form-actions">
+        <button type="submit" disabled={!canSubmit}>
           {submitLabel}
         </button>
         {extra}
       </div>
+      {hint && <p className="small muted">{hint}</p>}
     </form>
   )
 }

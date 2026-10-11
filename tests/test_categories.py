@@ -118,16 +118,6 @@ def test_parent_with_children_cannot_be_deleted(db, ids):
         svc.delete_category(db, child.id)
 
 
-def test_bulk_reassign(db, ids):
-    cats, _ = ids
-    a, b = _txn(db, cats["Grocery"]), _txn(db, cats["Grocery"])
-    assert svc.reassign_transactions(db, [a.id, b.id], cats["Rent"]) == 2
-    db.refresh(a)
-    assert a.category_id == cats["Rent"]
-    with pytest.raises(CategoryError):  # top-level sections are not assignable
-        svc.reassign_transactions(db, [a.id], cats["Essential Variable"])
-
-
 def test_category_config_types_and_levels(db):
     try:
         assert [t.key for t in cfg.get_types(db)] == ["expense", "income", "savings", "debt", "investment"]

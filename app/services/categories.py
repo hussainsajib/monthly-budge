@@ -212,13 +212,3 @@ def delete_category(db: Session, category_id: int, move_to_id: int | None = None
         )
     db.delete(node.category)
     db.commit()
-
-
-def reassign_transactions(db: Session, transaction_ids: list[int], category_id: int) -> int:
-    """Bulk re-map transactions to another category."""
-    target = load_tree(db).nodes.get(category_id)
-    if target is None or target.depth < 1:
-        raise CategoryError("Pick a category (not a top-level section)")
-    result = db.execute(update(Transaction).where(Transaction.id.in_(transaction_ids)).values(category_id=category_id))
-    db.commit()
-    return result.rowcount

@@ -19,6 +19,11 @@ Project conventions. Follow these when building or editing the frontend UI.
   `app/services/transactions.py`.
 - **Icons:** `lucide-react` named imports. **Tooltips:** `react-tooltip` (one
   `<Tooltip id=... />` per page, referenced via `data-tooltip-*`).
+- **Icon buttons & static SVGs:** for icon-only ghost buttons (add/import/reset/save,
+  right-aligned page-header action groups) and any pasted SVG used as a button icon,
+  follow the recipe in `frontend/public/static/README.md`. Place SVGs under
+  `frontend/public/static/`, reference with a `?v=N` cache-buster, use `icon-btn ghost`
+  + `icon-img(-lg)`, and wrap header groups in `.row-actions`.
 - **Pagination:** `react-paginate` (unwrap its `.default` — CJS interop). **Loading:**
   `react-content-loader` skeleton rows, not "Loading…" text.
 - **Styling:** use the existing CSS variables (`--bg`, `--surface`, `--ink`, `--line`,

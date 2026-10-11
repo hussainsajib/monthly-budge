@@ -5,6 +5,7 @@
   --good: #0b7a3c; --warn: #9a6200; --bad: #c0302f; --bad-bg: #fbe9e8; --warn-bg: #fff3dc;
   --series-1: #2a78d6; --series-2: #eb6834; --track: #c9c8c2;
   --radius: 10px;
+  --fs-base: 13px;
   --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-money: var(--font-body);
 }
@@ -17,7 +18,8 @@
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font-body); }
+[hidden] { display: none; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: var(--fs-base)/1.45 var(--font-body); }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 nav { background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
@@ -29,6 +31,12 @@ main { max-width: 1440px; margin: 0 auto; padding: 20px 16px 60px; }
 h1 { font-size: 22px; margin: 0 0 16px; }
 h2 { font-size: 16px; margin: 24px 0 10px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.filter-bar { margin: 28px 0 12px; }
+.filter-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
+.chip.chip-clear { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border: 0; padding: 4px 10px; }
+.chip.chip-clear:hover { border-color: var(--accent); color: var(--ink); }
+.chip.chip-clear svg { color: var(--muted); }
+.chip.chip-clear:hover svg { color: var(--bad); }
 .loading-skeleton { display: grid; gap: 12px; }
 .flash { padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px; border: 1px solid var(--line); }
 .flash.ok { background: var(--surface); border-left: 4px solid var(--good); }
@@ -51,6 +59,9 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 .row.center { align-items: center; }
 .row > * { flex: 1 1 140px; }
 .row > .shrink { flex: 0 0 auto; }
+.row > .date-field { flex: 0 0 130px; min-width: 0; }
+.row > .date-field input { min-width: 0; }
+.row > .field-search { flex: 2 1 260px; min-width: 0; }
 .push { margin-left: auto; }
 .inline-field-right { display: flex; align-items: end; gap: 12px; }
 .mt-12 { margin-top: 12px; }
@@ -72,6 +83,10 @@ th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--lin
 th { font-size: 12px; color: var(--ink-2); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
 td.num, th.num { text-align: right; font-family: var(--font-money); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .table-wrap { overflow-x: auto; }
+.txn-table { table-layout: fixed; }
+.txn-table tbody tr.clickable { cursor: pointer; }
+.txn-table tbody tr.clickable:hover td { background: var(--bg); }
+.txn-table td.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 tr.root td { font-weight: 700; background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
 tr.planned td { color: var(--muted); font-style: italic; }
 tr.low td { background: var(--bad-bg); } tr.warn td { background: var(--warn-bg); }
@@ -105,8 +120,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 label.check { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink); margin: 0 0 12px; }
 td .chip { margin-left: 6px; }
 td select { min-height: 36px; padding: 6px 8px; }
-.cat-pair { display: flex; gap: 6px; align-items: flex-start; }
-.cat-pair > * { flex: 1 1 0; min-width: 0; }
+.cat-pair { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+.cat-pair > * { flex: 1 1 120px; min-width: 0; }
 .cat-col { display: block; }
 .cat-col label { margin-bottom: 4px; }
 .field-cat { flex: 1 1 340px; }
@@ -163,10 +178,19 @@ a.num-link:hover { color: var(--accent); }
 .kind-dot.investment { background: var(--series-2); }
 .kind-dot.debt { background: var(--bad); }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; z-index: 100; overflow-y: auto; }
+.modal-overlay.center { align-items: center; }
+.range-pop { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); border: 1px solid var(--accent); border-radius: 12px; padding: 16px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25); }
 .modal { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; max-width: 900px; width: 100%; padding: 20px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25); }
 .modal:focus { outline: none; }
 .form-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .form-grid .field-full { grid-column: 1 / -1; }
+.form-page { max-width: 680px; }
+.form-grid textarea { height: auto; min-height: 88px; resize: vertical; }
+.form-section { margin-top: 24px; }
+.form-section:first-child { margin-top: 0; }
+.form-section > h2 { margin: 0 0 12px; font-size: 15px; color: var(--ink); }
+.category-cascade .cat-pair > * { flex: 1 1 300px; }
+.form-actions { margin-top: 20px; }
 .form-grid.schedule-grid { align-items: end; }
 .form-grid.schedule-grid label.check { margin: 0; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
@@ -197,6 +221,10 @@ button:not(.secondary) .icon-img { filter: brightness(0) invert(1); } /* current
 button.secondary .icon-img { filter: invert(1); } /* the white cart -> dark on light buttons */
 button.ghost .icon-img { filter: none; } /* the blue add icon keeps its accent color */
 .row-actions { display: inline-flex; align-items: center; gap: 12px; }
+.btn-pair { display: inline-flex; align-items: center; gap: 2px; }
+.btn-pair .icon-btn { padding: 0; }
+.row > .btn-pair { flex: 0 1 auto; margin-left: auto; }
+.row > .row-actions { flex: 0 1 auto; margin-left: auto; }
 .row-actions a, .row-actions .link-button { display: inline-flex; align-items: center; color: var(--accent); }
 .sort-header { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 0; min-height: 0; color: var(--ink-2); font-weight: 600; font-size: 12px; cursor: pointer; }
 .sort-header:hover { color: var(--ink); }
